@@ -1,0 +1,15 @@
+resolver: lts-8.16
+
+packages:
+- .
+extra-deps: []
+
+flags: {}
+
+extra-package-dbs: []
+
+system-ghc: true
+
+nix:
+  enable: true
+  packages: [zlib]
