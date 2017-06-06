@@ -18,18 +18,12 @@ import qualified Test.Tasty as Tasty
 import qualified Test.Tasty.HUnit as HUnit
 import           Text.Printf (printf)
 
-data TracerState = TracerState
-  { tracerEnv :: !DD.TraceEnv
-  , tracerSetup :: !DD.TraceSetup
-  , tracerState :: !DD.TraceState
-  }
-
-newtype Tracer a = Tracer { _unTrace :: MTL.StateT TracerState IO a }
+newtype Tracer a = Tracer { _unTrace :: MTL.StateT DD.TraceState IO a }
   deriving ( Applicative
            , Functor
            , Monad
            , Base.MonadBase IO
-           , MTL.MonadState TracerState
+           , MTL.MonadState DD.TraceState
            , Catch.MonadThrow
            , Catch.MonadCatch
            , Catch.MonadMask
@@ -39,10 +33,8 @@ instance MonadIO Tracer where
   liftIO = Base.liftBase
 
 instance DD.MonadTrace Tracer where
-  askTraceSetup = Tracer (MTL.gets tracerSetup)
-  askTraceState = Tracer (MTL.gets tracerState)
-  askTraceEnv = Tracer (MTL.gets tracerEnv)
-  modifyTraceState f = Tracer (MTL.modify' (\st -> st { tracerState = f (tracerState st) }))
+  askTraceState = Tracer MTL.get
+  modifyTraceState = Tracer . MTL.modify'
 
 runTracerM :: (Catch.MonadMask m, MonadIO m) => Warp.Port -> Tracer a -> m a
 runTracerM port (Tracer act) = do
@@ -50,12 +42,11 @@ runTracerM port (Tracer act) = do
     req <- HTTP.parseRequest (printf "http://localhost:%d/v0.3/traces" port)
     return $! req { HTTP.method = HTTP.methodPut }
 
-  setup <- DD.mkDefaultTraceSetup >>= \setup ->
-    return $! setup { DD._trace_request = req }
+  config <- DD.mkDefaultTraceConfig >>= \config ->
+    return $! config { DD._trace_request = req }
 
-  DD.withTracing setup $ \env -> do
-    st <- DD.newTraceState
-    liftIO $ fst <$> MTL.runStateT act (TracerState env setup st)
+  DD.withTracing config $ \state -> do
+    liftIO $ fst <$> MTL.runStateT act state
 
 mkEcho :: STM.TVar Int -> Wai.Application
 mkEcho counter _req respond = do
@@ -73,17 +64,13 @@ main = do
     step "Can get own request"
     runTracerM port $ do
       liftIO $ step "Top level"
-      liftIO $ putStrLn "top level"
       doSpan "top" $ do
         liftIO $ step "Mid level"
-        liftIO $ putStrLn "Hello world"
         doSpan "child" $ do
           liftIO $ step "Bottom level"
-          liftIO $ putStrLn "Bye world"
       doSpan "sleep" $ do
         liftIO $ threadDelay 2000000
-        liftIO $ putStrLn "Sleep world"
-  STM.atomically $ STM.readTVar counter >>= STM.check . (== 3)
+    STM.atomically $ STM.readTVar counter >>= STM.check . (== 2)
   where
     mkSpanInfo qual = DD.SpanInfo
       { DD._span_info_name = qual <> "-span"
