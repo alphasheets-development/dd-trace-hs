@@ -1,4 +1,5 @@
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE LambdaCase   #-}
+{-# LANGUAGE ViewPatterns #-}
 module Network.Datadog.Trace
   ( MonadTrace(..)
   , Network.Datadog.Trace.span
@@ -18,7 +19,7 @@ module Network.Datadog.Trace
 import           Control.Concurrent (forkIO, ThreadId, myThreadId)
 import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TBChan as STM
-import           Control.Monad (forM_, replicateM_, unless, void)
+import           Control.Monad (forM_, replicateM_, unless, void, when)
 import qualified Control.Monad.Catch as Catch
 import           Control.Monad.IO.Class (liftIO, MonadIO(..))
 import           Control.Monad.Trans.Resource (runResourceT)
@@ -31,6 +32,8 @@ import           Data.Maybe (listToMaybe)
 import           Data.Monoid ((<>), mempty)
 import           Data.String (fromString)
 import           Data.Text (Text)
+import qualified Data.Text as Text (pack)
+import qualified Data.Text.IO as Text (putStrLn)
 import           Network.Datadog.Trace.Types
 import qualified Network.HTTP.Conduit as HTTP
 import qualified Network.HTTP.Simple as HTTP
@@ -56,6 +59,8 @@ mkDefaultTraceSetup = liftIO $ do
     , _trace_max_send_amount = 512
     , _trace_enabled = True
     , _trace_do_sends = True
+    , _trace_debug = False
+    , _trace_debug_callback = Text.putStrLn
     }
 
 -- | Make a new trace. Note that IDs are picked randomly
@@ -168,7 +173,7 @@ startTracing ts = liftIO $ do
             STM.atomically $ do
               STM.modifyTVar' workerMap (Map.delete tId)
           Just es' -> do
-            runSend (_trace_do_sends ts) es' (_trace_request ts)
+            runSend ts es'
             loop
       return $! (threadId, dieRef)
 
@@ -199,14 +204,14 @@ stopTracing ts env = liftIO $ do
     Nothing -> return ()
     Just{} -> do
       es <- STM.atomically (getTBChanContents $ _trace_chan env)
-      runSend (_trace_do_sends ts) es (_trace_request ts)
+      runSend ts es
 
 -- | Perform the actual send of the given spans to tracing agent.
-runSend :: Bool -- ^ Actually perform the send?
-        -> NonEmpty FinishedSpan -> HTTP.Request -> IO ()
-runSend False _ _ = return ()
-runSend True sps req = runResourceT $ do
-  let req' = HTTP.setRequestBodyJSON [NE.toList sps] req
+runSend :: TraceSetup -- ^
+        -> NonEmpty FinishedSpan -> IO ()
+runSend (_trace_do_sends -> False) _ = return ()
+runSend ts sps = runResourceT $ do
+  let req' = HTTP.setRequestBodyJSON [NE.toList sps] (_trace_request ts)
       req'' = req'
               { -- TODO: If charset is set in content-type, connection
                 -- fails completely. Investigate if Haskell is failing
@@ -216,6 +221,8 @@ runSend True sps req = runResourceT $ do
                                     : filter (\(h, _) -> h /= HTTP.hContentType)
                                              (HTTP.requestHeaders req')
               }
+  when (_trace_debug ts) . liftIO $ do
+    _trace_debug_callback ts (fromString "Sending following spans: " <> Text.pack (show sps))
   void $ HTTP.httpNoBody req''
 
 startSpan

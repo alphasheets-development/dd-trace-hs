@@ -142,6 +142,10 @@ data TraceSetup = TraceSetup
     -- how the system will perform with it but not actually send the
     -- traces anywhere.
   , _trace_do_sends :: !Bool
+    -- | Print debug info?
+  , _trace_debug :: !Bool
+    -- | Custom trace debug callback
+  , _trace_debug_callback :: Text -> IO ()
   }
 
 instance Show TraceSetup where
