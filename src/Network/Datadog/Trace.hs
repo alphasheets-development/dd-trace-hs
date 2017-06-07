@@ -19,7 +19,7 @@ module Network.Datadog.Trace
 import           Control.Concurrent (forkIO, ThreadId, myThreadId)
 import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TBChan as STM
-import           Control.Monad (forM_, replicateM_, unless, void, when)
+import           Control.Monad (forM_, replicateM, unless, void, when)
 import qualified Control.Monad.Catch as Catch
 import           Control.Monad.IO.Class (liftIO, MonadIO(..))
 import           Control.Monad.Trans.Resource (runResourceT)
@@ -153,7 +153,8 @@ startTracing :: MonadIO m => TraceConfig -> m TraceEnv
 startTracing config = liftIO $ do
   ch <- STM.newTBChanIO (_trace_chan_bound config)
   workerMap <- STM.newTVarIO Map.empty
-  replicateM_ (_trace_number_of_workers config) (startWorker ch workerMap)
+  workers <- replicateM (_trace_number_of_workers config) (startWorker ch workerMap)
+  liftIO . STM.atomically $ STM.writeTVar workerMap (Map.fromList workers)
   return $! TraceEnv
     { _trace_workers = workerMap
     , _trace_chan = ch
@@ -226,9 +227,11 @@ runSend ts traces = runResourceT $ do
                                     : filter (\(h, _) -> h /= HTTP.hContentType)
                                              (HTTP.requestHeaders req')
               }
-  when (_trace_debug ts) . liftIO $ do
-    _trace_debug_callback ts (fromString "Sending following spans: " <> Text.pack (show traces))
-  void $ HTTP.httpNoBody req''
+  debug $ fromString "Sending following spans: " <> Text.pack (show traces)
+  void (HTTP.httpNoBody req'') `Catch.catch`
+    (\(e :: Catch.SomeException) -> debug $ fromString "Exception on send: " <> Text.pack (show e))
+  where
+    debug = when (_trace_debug ts) . liftIO . _trace_debug_callback ts
 
 startSpan
   :: (MonadIO m, MonadTrace m)
