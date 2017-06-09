@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes                 #-}
 module Network.Datadog.Trace.Types
@@ -167,9 +168,10 @@ data UserWorkerConfig = UserWorkerConfig
   }
 
 -- | Workers process traces and decide what to do with them.
-data WorkerConfig = Datadog DatadogWorkerConfig
-                  | HandleWorker (forall t. HandleWorkerConfig t)
-                  | UserWorker UserWorkerConfig
+data WorkerConfig where
+  Datadog :: DatadogWorkerConfig -> WorkerConfig
+  HandleWorker :: forall t. HandleWorkerConfig t -> WorkerConfig
+  UserWorker :: UserWorkerConfig -> WorkerConfig
 
 -- | The implementation of the "thing" actually processing the traces:
 -- writing to file, sending elsewhere, discarding...
