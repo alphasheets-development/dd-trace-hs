@@ -4,8 +4,11 @@
 {-# LANGUAGE ViewPatterns        #-}
 module Network.Datadog.Trace
   ( Network.Datadog.Trace.Types.MonadTrace(..)
+  , Network.Datadog.Trace.Types.DatadogWorkerConfig(..)
+  , Network.Datadog.Trace.Types.HandleWorkerConfig(..)
   , Network.Datadog.Trace.Types.SpanInfo(..)
   , Network.Datadog.Trace.Types.TraceState(..)
+  , Network.Datadog.Trace.Types.UserWorkerConfig(..)
   , Network.Datadog.Trace.Types.WorkerConfig(..)
   , Network.Datadog.Trace.modifySpanMeta
   , Network.Datadog.Trace.modifySpanMetrics
