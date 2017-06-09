@@ -2,7 +2,8 @@ resolver: lts-8.16
 
 packages:
 - .
-extra-deps: []
+extra-deps:
+- unagi-chan-0.4.0.0
 
 flags: {}
 

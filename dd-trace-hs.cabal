@@ -16,8 +16,12 @@ library
   hs-source-dirs:      src
   exposed-modules:     Network.Datadog.Trace
                        Network.Datadog.Trace.Types
+                       Network.Datadog.Trace.Workers.Datadog
+                       Network.Datadog.Trace.Workers.Handle
+                       Network.Datadog.Trace.Workers.Null
   build-depends:       base >= 4.7 && < 5
                      , aeson
+                     , async
                      , clock
                      , containers
                      , exceptions
@@ -27,8 +31,7 @@ library
                      , resourcet
                      , text
                      , transformers
-                     , stm
-                     , stm-chans
+                     , unagi-chan
   default-language:    Haskell2010
   ghc-options:         -Wall -Werror
 

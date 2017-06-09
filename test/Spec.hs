@@ -9,7 +9,8 @@ import qualified Control.Monad.Catch as Catch
 import           Control.Monad.IO.Class (MonadIO(..))
 import qualified Control.Monad.State.Strict as MTL
 import           Data.Monoid ((<>))
-import qualified Network.Datadog.Trace as DD
+import qualified Network.Datadog.Trace as Trace
+import qualified Network.Datadog.Trace.Workers.Datadog as Trace
 import qualified Network.HTTP.Conduit as HTTP
 import qualified Network.HTTP.Types as HTTP
 import qualified Network.Wai as Wai
@@ -18,12 +19,12 @@ import qualified Test.Tasty as Tasty
 import qualified Test.Tasty.HUnit as HUnit
 import           Text.Printf (printf)
 
-newtype Tracer a = Tracer { _unTrace :: MTL.StateT DD.TraceState IO a }
+newtype Tracer a = Tracer { _unTrace :: MTL.StateT Trace.TraceState IO a }
   deriving ( Applicative
            , Functor
            , Monad
            , Base.MonadBase IO
-           , MTL.MonadState DD.TraceState
+           , MTL.MonadState Trace.TraceState
            , Catch.MonadThrow
            , Catch.MonadCatch
            , Catch.MonadMask
@@ -32,7 +33,7 @@ newtype Tracer a = Tracer { _unTrace :: MTL.StateT DD.TraceState IO a }
 instance MonadIO Tracer where
   liftIO = Base.liftBase
 
-instance DD.MonadTrace Tracer where
+instance Trace.MonadTrace Tracer where
   askTraceState = Tracer MTL.get
   modifyTraceState = Tracer . MTL.modify'
 
@@ -42,10 +43,11 @@ runTracerM port (Tracer act) = do
     req <- HTTP.parseRequest (printf "http://localhost:%d/v0.3/traces" port)
     return $! req { HTTP.method = HTTP.methodPut }
 
-  config <- DD.mkDefaultTraceConfig >>= \config ->
-    return $! config { DD._trace_request = req }
+  config <- liftIO Trace.defaultDatadogWorkerConfig >>= \config ->
+    return . Trace.Datadog $! config { Trace._datadog_request = req }
 
-  DD.withTracing config $ \state -> do
+  -- Run datadog tracer twice to test multiple workers actually work.
+  Trace.withTracing [config, config] $ \state -> do
     liftIO $ fst <$> MTL.runStateT act state
 
 mkEcho :: STM.TVar Int -> Wai.Application
@@ -70,12 +72,13 @@ main = do
           liftIO $ step "Bottom level"
       doSpan "sleep" $ do
         liftIO $ threadDelay 2000000
-    STM.atomically $ STM.readTVar counter >>= STM.check . (== 2)
+    -- Two workers sending 2 requests each, 4 requests.
+    STM.atomically $ STM.readTVar counter >>= STM.check . (== 4)
   where
-    mkSpanInfo qual = DD.SpanInfo
-      { DD._span_info_name = qual <> "-span"
-      , DD._span_info_resource = qual <> "-resource"
-      , DD._span_info_service = qual <> "-service"
-      , DD._span_info_type = qual <> "-type"
+    mkSpanInfo qual = Trace.SpanInfo
+      { Trace._span_info_name = qual <> "-span"
+      , Trace._span_info_resource = qual <> "-resource"
+      , Trace._span_info_service = qual <> "-service"
+      , Trace._span_info_type = qual <> "-type"
       }
-    doSpan qual = DD.span (mkSpanInfo qual)
+    doSpan qual = Trace.span (mkSpanInfo qual)

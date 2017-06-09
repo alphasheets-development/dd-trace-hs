@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE RankNTypes                 #-}
 module Network.Datadog.Trace.Types
   ( FinishedSpan
   , GroupedSpan
@@ -9,14 +10,15 @@ module Network.Datadog.Trace.Types
   , RunningSpan
   , Span(..)
   , SpanInfo(..)
-  , TraceConfig(..)
-  , TraceEnv(..)
+  , Trace
   , TraceState(..)
+  , DatadogWorkerConfig(..)
+  , HandleWorkerConfig(..)
+  , Worker(..)
+  , WorkerConfig(..)
+  , UserWorkerConfig(..)
   ) where
 
-import           Control.Concurrent (ThreadId)
-import qualified Control.Concurrent.STM.TBChan as STM
-import qualified Control.Concurrent.STM.TVar as STM
 import qualified Control.Monad.Trans.Class as T
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
@@ -25,7 +27,6 @@ import           Data.Text (Text)
 import           Data.Word (Word8, Word64)
 import           GHC.Generics (Generic)
 import qualified Network.HTTP.Simple as HTTP
-import           Text.Printf (printf)
 
 -- | A single trace (such as "user makes a request for a file") is
 -- split into many 'Span's ("find file on disk", "read file", "send
@@ -76,6 +77,9 @@ type FinishedSpan = Span Word64 ()
 -- other spans in the same trace.
 type GroupedSpan = Span Word64 Id
 
+-- | A trace is just a collection of spans.
+type Trace = [GroupedSpan]
+
 -- | Aeson parser options for 'Span's.
 spanOptions :: Aeson.Options
 spanOptions = Aeson.defaultOptions
@@ -100,99 +104,95 @@ data SpanInfo = SpanInfo
     _span_info_type :: !Text
   } deriving (Show, Eq, Ord)
 
--- | Configuration for the tracing subsystem.
-data TraceConfig = TraceConfig
+-- | Worker sending data to a datadog trace agent.
+data DatadogWorkerConfig = DatadogWorkerConfig
   { -- | Request to perform when sending traces. For example
     --
     -- @
     -- initReq <- 'HTTP.parseRequest' "http://localhost:8126/v0.3/traces"
     -- return $! 'TraceConfig' { '_trace_request' = initReq { 'HTTP.method' = fromString "PUT" } }
     -- @
-    _trace_request :: !HTTP.Request
+    _datadog_request :: !HTTP.Request
     -- | How many green threads to use to consume incoming traces. The
     -- trade-off is between blocking on slow sends to local trace
     -- daemon and filling up the queue and between having many idle
     -- workers.
-  , _trace_number_of_workers :: !Int
-    -- | Whether to block span writes into '_trace_chan' when the
+  , _datadog_number_of_workers :: !Int
+    -- | Whether to block span writes into '_datadog_chan' when the
     -- channel is full. This shouldn't affect the user action speed
     -- but if your channel fills up, it means potential long waits
     -- between actions.
-  , _trace_blocking :: !Bool
-    -- | '_trace_chan' bound.
-  , _trace_chan_bound :: !Int
-    -- | Action to perform when '_trace_blocking' is 'False' and the
+  , _datadog_blocking :: !Bool
+    -- | '_datadog_chan' bound.
+  , _datadog_chan_bound :: !Int
+    -- | Action to perform when '_datadog_blocking' is 'False' and the
     -- channel is full: we're dropping the span and might want to at
     -- least log that. Ideally you should set the other parameters in
     -- such a way that this never fires.
-  , _trace_on_blocked :: [GroupedSpan] -> IO ()
-    -- | How many finished spans to try and send in a single request.
-    -- Note that this does not determine amount of data that will be
-    -- sent as 'FinishedSpan's have unbounded size fields.
-  , _trace_max_send_amount :: !Int
-    -- | Is tracing enabled? If not, the tracer will simply execute
-    -- inner actions without doing any work. It is important to
-    -- understand that tracing will still have an impact even if it
-    -- doesn't do any work itself:
-    --
-    -- * Any arguments passed in strictly that otherwise would not be
-    --   used will still be evaluated.
-    --
-    -- * GHC may produce different code even with do-nothing spans
-    --   everywhere.
-    --
-    -- Further, this simply performs checks in user-exposed interface
-    -- whether it is enabled.
-  , _trace_enabled :: !Bool
+  , _datadog_on_blocked :: Trace -> IO ()
     -- | Sometimes we may want to leave tracing on to get a feel for
     -- how the system will perform with it but not actually send the
     -- traces anywhere.
-  , _trace_do_sends :: !Bool
-    -- | Print debug info?
-  , _trace_debug :: !Bool
+  , _datadog_do_writes :: !Bool
     -- | Custom trace debug callback
-  , _trace_debug_callback :: Text -> IO ()
+  , _datadog_debug_callback :: Text -> IO ()
+    -- | Print debug info when sending traces?
+  , _datadog_debug :: !Bool
   }
 
-instance Show TraceConfig where
-  show ts = printf
-    (concat [ "TraceConfig {"
-            , " _trace_request = %s"
-            , ", _trace_number_of_workers = %d"
-            , ", _trace_blocking = %s"
-            , ", _trace_chan_bound = %d"
-            , ", _trace_on_blocked = <FinishedSpan -> IO ()>"
-            , ", _trace_max_send_amount = %d"
-            , ", _trace_enabled = %s"
-            , ", _trace_do_sends = %s"
-            , " }"
-            ])
-    (show $ _trace_request ts) (_trace_number_of_workers ts)
-    (show $ _trace_blocking ts) (_trace_chan_bound ts)
-    (_trace_max_send_amount ts) (show $ _trace_enabled ts)
-    (show $ _trace_do_sends ts)
+-- | Configuration for a worker writing to user-provided handle.
+data HandleWorkerConfig t = HandleWorkerConfig
+  { -- | Conversion function for traces to 'Text' that we can write out.
+    _handle_worker_serialise :: Trace -> t
+    -- | Write the serialised trace out.
+  , _handle_worker_writer :: t -> IO ()
+    -- | Should we serialise the value before we send it to the
+    -- worker? This can make a difference if writes to the handle are
+    -- slow but the serialisation itself is cheap: if serialised form
+    -- is cheaper than 'Trace' and quick to compute and writing to the
+    -- handle is taking a while, it's can be more beneficial to keep
+    -- the serialised form in memory rather than the trace itself.
+  , _handle_worker_serialise_before_send :: !Bool
+  }
 
--- | Tracing environment keeping track of workers and any other
--- metadata internal to implementation.
-data TraceEnv = TraceEnv
-  { _trace_workers :: !(STM.TVar (Map ThreadId (STM.TVar Bool)))
-  , _trace_chan :: !(STM.TBChan [GroupedSpan])
+-- | User-provided trace handler. Close over any state you need to
+-- track.
+data UserWorkerConfig = UserWorkerConfig
+  { -- | A blocking action that sets up the user worker.
+    _user_setup :: IO ()
+    -- | Action processing a trace.
+  , _user_run :: Trace -> IO ()
+    -- | A blocking action that tears down the worker.
+  , _user_die :: IO ()
+  }
+
+-- | Workers process traces and decide what to do with them.
+data WorkerConfig = Datadog DatadogWorkerConfig
+                  | HandleWorker (forall t. HandleWorkerConfig t)
+                  | UserWorker UserWorkerConfig
+
+-- | The implementation of the "thing" actually processing the traces:
+-- writing to file, sending elsewhere, discarding...
+data Worker = Worker
+  { -- | Kill the worker and wait until it dies.
+    _worker_die :: IO ()
+    -- | Invoke the worker on the given trace.
+  , _worker_run :: Trace -> IO ()
+  -- | Tracing environment keeping track of workers and any other
+  -- metadata internal to implementation.
   }
 
 -- | State of an on-going trace.
 data TraceState = TraceState
   { -- | Implementation internal environment that tracer uses.
-    _trace_env :: !TraceEnv
+    _trace_worker :: !(Maybe Worker)
     -- | Stack of spans which haven't finished yet.
   , _working_spans :: ![RunningSpan]
     -- | Set of spans which finished but haven't been assigned an
     -- trace_id yet as there may be more spans in their traces to come
     -- still.
   , _finished_spans :: ![FinishedSpan]
-    -- | Configuration for the tracer.
-  , _trace_config :: !TraceConfig
   }
-
 
 -- | Basically MonadState
 class MonadTrace m where
