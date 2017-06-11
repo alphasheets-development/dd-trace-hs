@@ -20,6 +20,10 @@ module Network.Datadog.Trace.Types
   , UserWorkerConfig(..)
   ) where
 
+import qualified Control.Monad.Trans.Class as T
+import qualified Control.Monad.Trans.Reader as Reader
+import qualified Control.Monad.Trans.State.Lazy as StateLazy
+import qualified Control.Monad.Trans.State.Strict as StateStrict
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import           Data.Map.Strict (Map)
@@ -199,3 +203,15 @@ data TraceState = TraceState
 class MonadTrace m where
   askTraceState :: m TraceState
   modifyTraceState :: (TraceState -> TraceState) -> m ()
+
+instance (Monad m, MonadTrace m) => MonadTrace (StateLazy.StateT s m) where
+  askTraceState = T.lift askTraceState
+  modifyTraceState = T.lift . modifyTraceState
+
+instance (Monad m, MonadTrace m) => MonadTrace (StateStrict.StateT s m) where
+  askTraceState = T.lift askTraceState
+  modifyTraceState = T.lift . modifyTraceState
+
+instance (Monad m, MonadTrace m) => MonadTrace (Reader.ReaderT r m) where
+  askTraceState = T.lift askTraceState
+  modifyTraceState = T.lift . modifyTraceState
