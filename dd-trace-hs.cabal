@@ -44,10 +44,10 @@ test-suite dd-trace-hs-test
                      , exceptions
                      , http-conduit
                      , http-types
-                     , mtl
                      , stm
                      , tasty
                      , tasty-hunit
+                     , transformers
                      , transformers-base
                      , wai
                      , warp
@@ -61,7 +61,7 @@ executable dd-trace-hs-trivial
   build-depends:       base
                      , dd-trace-hs
                      , exceptions
-                     , mtl
+                     , transformers
                      , transformers-base
   default-language:    Haskell2010
 

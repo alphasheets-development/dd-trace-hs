@@ -3,26 +3,29 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns        #-}
 module Network.Datadog.Trace
-  ( Network.Datadog.Trace.Types.MonadTrace(..)
-  , Network.Datadog.Trace.Types.DatadogWorkerConfig(..)
+  ( Network.Datadog.Trace.Types.DatadogWorkerConfig(..)
   , Network.Datadog.Trace.Types.HandleWorkerConfig(..)
+  , Network.Datadog.Trace.Types.MonadTrace(..)
   , Network.Datadog.Trace.Types.SpanInfo(..)
   , Network.Datadog.Trace.Types.TraceState(..)
   , Network.Datadog.Trace.Types.UserWorkerConfig(..)
   , Network.Datadog.Trace.Types.WorkerConfig(..)
+  , Network.Datadog.Trace.Workers.Datadog.defaultDatadogWorkerConfig
+  , Network.Datadog.Trace.Workers.Handle.defaultHandleWorkerConfig
+  , Network.Datadog.Trace.Workers.Null.nullWorkerConfig
+  , Network.Datadog.Trace.defaultAskTraceState
+  , Network.Datadog.Trace.defaultModifyTraceState
   , Network.Datadog.Trace.modifySpanMeta
   , Network.Datadog.Trace.modifySpanMetrics
   , Network.Datadog.Trace.signalSpanError
   , Network.Datadog.Trace.span
   , Network.Datadog.Trace.withTracing
-  , Network.Datadog.Trace.Workers.Null.nullWorkerConfig
-  , Network.Datadog.Trace.Workers.Handle.defaultHandleWorkerConfig
-  , Network.Datadog.Trace.Workers.Datadog.defaultDatadogWorkerConfig
   ) where
 
 import qualified Control.Concurrent.Async as Async
 import qualified Control.Monad.Catch as Catch
 import           Control.Monad.IO.Class (liftIO, MonadIO(..))
+import qualified Control.Monad.Trans.Class as T
 import           Data.Foldable (for_)
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -205,3 +208,15 @@ endSpan = do
           st' { _working_spans = restSpans
               , _finished_spans = finishedSpan : _finished_spans st'
               }
+
+-- | Default implementation for 'askTraceState' for 'T.MonadTrans'.
+defaultAskTraceState
+  :: (T.MonadTrans t, Monad m, MonadTrace m)
+  => t m TraceState
+defaultAskTraceState = T.lift askTraceState
+
+-- | Default implementation for 'modifyTraceState' for 'T.MonadTrans'.
+defaultModifyTraceState
+  :: (T.MonadTrans t, Monad m, MonadTrace m)
+  => (TraceState -> TraceState) -> t m ()
+defaultModifyTraceState = T.lift . modifyTraceState

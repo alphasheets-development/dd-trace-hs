@@ -20,7 +20,6 @@ module Network.Datadog.Trace.Types
   , UserWorkerConfig(..)
   ) where
 
-import qualified Control.Monad.Trans.Class as T
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import           Data.Map.Strict (Map)
@@ -200,7 +199,3 @@ data TraceState = TraceState
 class MonadTrace m where
   askTraceState :: m TraceState
   modifyTraceState :: (TraceState -> TraceState) -> m ()
-
-instance (T.MonadTrans t, Monad m, MonadTrace m) => MonadTrace (t m) where
-  askTraceState = T.lift askTraceState
-  modifyTraceState = T.lift . modifyTraceState

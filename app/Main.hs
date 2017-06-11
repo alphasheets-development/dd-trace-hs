@@ -8,18 +8,17 @@ import           Control.Concurrent (threadDelay)
 import qualified Control.Monad.Base as Base
 import qualified Control.Monad.Catch as Catch
 import           Control.Monad.IO.Class (MonadIO(..))
-import qualified Control.Monad.State.Strict as MTL
+import qualified Control.Monad.Trans.State.Strict as T
+import qualified Data.IORef as IORef
 import           Data.Monoid ((<>))
 import qualified Network.Datadog.Trace as Trace
 import qualified Network.Datadog.Trace.Types as Trace
-import qualified Data.IORef as IORef
 
-newtype Tracer a = Tracer { _unTrace :: MTL.StateT Trace.TraceState IO a }
+newtype Tracer a = Tracer { _unTrace :: T.StateT Trace.TraceState IO a }
   deriving ( Applicative
            , Functor
            , Monad
            , Base.MonadBase IO
-           , MTL.MonadState Trace.TraceState
            , Catch.MonadThrow
            , Catch.MonadCatch
            , Catch.MonadMask
@@ -29,8 +28,8 @@ instance MonadIO Tracer where
   liftIO = Base.liftBase
 
 instance Trace.MonadTrace Tracer where
-  askTraceState = Tracer MTL.get
-  modifyTraceState = Tracer . MTL.modify'
+  askTraceState = Tracer T.get
+  modifyTraceState = Tracer . T.modify'
 
 runTracerM :: (Catch.MonadMask m, MonadIO m) => Tracer a -> m [Trace.Trace]
 runTracerM (Tracer act) = do
@@ -41,7 +40,7 @@ runTracerM (Tracer act) = do
         , Trace._user_die = return ()
         }
   Trace.withTracing [ioRefWorker] $ \state -> liftIO $ do
-    _ <- MTL.runStateT act state
+    _ <- T.runStateT act state
     IORef.readIORef tracesRef
 
 main :: IO ()

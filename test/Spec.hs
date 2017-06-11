@@ -7,10 +7,9 @@ import qualified Control.Concurrent.STM as STM
 import qualified Control.Monad.Base as Base
 import qualified Control.Monad.Catch as Catch
 import           Control.Monad.IO.Class (MonadIO(..))
-import qualified Control.Monad.State.Strict as MTL
+import qualified Control.Monad.Trans.State.Strict as T
 import           Data.Monoid ((<>))
 import qualified Network.Datadog.Trace as Trace
-import qualified Network.Datadog.Trace.Workers.Datadog as Trace
 import qualified Network.HTTP.Conduit as HTTP
 import qualified Network.HTTP.Types as HTTP
 import qualified Network.Wai as Wai
@@ -19,12 +18,11 @@ import qualified Test.Tasty as Tasty
 import qualified Test.Tasty.HUnit as HUnit
 import           Text.Printf (printf)
 
-newtype Tracer a = Tracer { _unTrace :: MTL.StateT Trace.TraceState IO a }
+newtype Tracer a = Tracer { _unTrace :: T.StateT Trace.TraceState IO a }
   deriving ( Applicative
            , Functor
            , Monad
            , Base.MonadBase IO
-           , MTL.MonadState Trace.TraceState
            , Catch.MonadThrow
            , Catch.MonadCatch
            , Catch.MonadMask
@@ -34,8 +32,8 @@ instance MonadIO Tracer where
   liftIO = Base.liftBase
 
 instance Trace.MonadTrace Tracer where
-  askTraceState = Tracer MTL.get
-  modifyTraceState = Tracer . MTL.modify'
+  askTraceState = Tracer T.get
+  modifyTraceState = Tracer . T.modify'
 
 runTracerM :: (Catch.MonadMask m, MonadIO m) => Warp.Port -> Tracer a -> m a
 runTracerM port (Tracer act) = do
@@ -47,8 +45,7 @@ runTracerM port (Tracer act) = do
     return . Trace.Datadog $! config { Trace._datadog_request = req }
 
   -- Run datadog tracer twice to test multiple workers actually work.
-  Trace.withTracing [config, config] $ \state -> do
-    liftIO $ fst <$> MTL.runStateT act state
+  Trace.withTracing [config, config] $ liftIO . T.evalStateT act
 
 mkEcho :: STM.TVar Int -> Wai.Application
 mkEcho counter _req respond = do
