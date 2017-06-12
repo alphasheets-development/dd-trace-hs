@@ -3,6 +3,13 @@
 {-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes                 #-}
+-- |
+-- Module   : Network.Datadog.Trace.Types
+-- Copyright: 2017 Alphasheets
+-- License  : All Rights Reserved
+--
+-- Types used throughout dd-trace-hs. Most useful things are
+-- re-exported in @Network.Datadog.Trace@.
 module Network.Datadog.Trace.Types
   ( FinishedSpan
   , GroupedSpan
@@ -183,8 +190,6 @@ data Worker = Worker
     _worker_die :: IO ()
     -- | Invoke the worker on the given trace.
   , _worker_run :: Trace -> IO ()
-  -- | Tracing environment keeping track of workers and any other
-  -- metadata internal to implementation.
   }
 
 -- | State of an on-going trace.

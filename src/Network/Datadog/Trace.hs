@@ -2,6 +2,12 @@
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns        #-}
+-- |
+-- Module   : Network.Datadog.Trace
+-- Copyright: 2017 Alphasheets
+-- License  : All Rights Reserved
+--
+-- Tracing library with datadog support.
 module Network.Datadog.Trace
   ( Network.Datadog.Trace.Types.DatadogWorkerConfig(..)
   , Network.Datadog.Trace.Types.HandleWorkerConfig(..)
@@ -48,22 +54,22 @@ import qualified System.Random as Random
 -- If no 'WorkerConfig' is provided, tracing is disabled.
 withTracing
   :: (Catch.MonadMask m, MonadIO m)
-     -- | Worker configs for the tracer. Pass '[]' to disable tracing.
-    --
-    -- Note that '[]' is not the same as passing something like
-    -- null worker in that simply discards everything. A null worker
-    -- will still measure how long things take, accumulate spans and
-    -- try to process traces, it just won't do anything with them.
-    --
-    -- Currently support for multiple workers is experimental. A
-    -- leaked exception in one worker will kill every other worker as
-    -- well as the whole tracing process. Likewise exception during
-    -- teardown is likely to not result in teardown running for other
-    -- workers. Use at own risk.
   => [WorkerConfig]
-     -- | User action. Useful to build user structure from with help
-     -- of 'TraceState'.
+     -- ^ Worker configs for the tracer. Pass '[]' to disable tracing.
+     --
+     -- Note that '[]' is not the same as passing something like
+     -- null worker in that simply discards everything. A null worker
+     -- will still measure how long things take, accumulate spans and
+     -- try to process traces, it just won't do anything with them.
+     --
+     -- Currently support for multiple workers is experimental. A
+     -- leaked exception in one worker will kill every other worker as
+     -- well as the whole tracing process. Likewise exception during
+     -- teardown is likely to not result in teardown running for other
+     -- workers. Use at own risk.
   -> (TraceState -> m a)
+     -- ^ User action. Useful to build user structure from with help
+     -- of 'TraceState'.
   -> m a
 withTracing mWorkerCfg act =
   Catch.bracket (startTracing mWorkerCfg) stopTracing $ \mWorker -> do
