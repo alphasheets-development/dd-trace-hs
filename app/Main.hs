@@ -31,7 +31,7 @@ instance Trace.MonadTrace Tracer where
   askTraceState = Tracer T.get
   modifyTraceState = Tracer . T.modify'
 
-runTracerM :: (Catch.MonadMask m, MonadIO m) => Tracer a -> m [Trace.Trace]
+runTracerM :: (Catch.MonadMask m, MonadIO m) => Tracer a -> m [Trace.FinishedSpan]
 runTracerM (Tracer act) = do
   tracesRef <- liftIO $ IORef.newIORef []
   let ioRefWorker = Trace.UserWorker $! Trace.UserWorkerConfig
@@ -46,7 +46,7 @@ runTracerM (Tracer act) = do
 main :: IO ()
 main = do
   putStrLn "Running tracer..."
-  traces <- runTracerM $ do
+  spans <- runTracerM $ do
     liftIO $ putStrLn "Top level"
     doSpan "top" $ do
       liftIO $ putStrLn "Inside top span"
@@ -55,7 +55,7 @@ main = do
     doSpan "sleep" $ liftIO $ do
       putStrLn "Inside sleep span, sleeping for 2 seconds..."
       threadDelay 2000000
-  putStrLn $ "Complete with: " <> show traces
+  putStrLn $ "Complete with: " <> show spans
   where
     mkSpanInfo qual = Trace.SpanInfo
       { Trace._span_info_name = qual <> "-span"

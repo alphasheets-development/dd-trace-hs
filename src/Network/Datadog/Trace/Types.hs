@@ -12,13 +12,11 @@
 -- re-exported in @Network.Datadog.Trace@.
 module Network.Datadog.Trace.Types
   ( FinishedSpan
-  , GroupedSpan
   , Id
   , MonadTrace(..)
   , RunningSpan
   , Span(..)
   , SpanInfo(..)
-  , Trace
   , TraceState(..)
   , DatadogWorkerConfig(..)
   , HandleWorkerConfig(..)
@@ -42,11 +40,11 @@ import qualified Network.HTTP.Simple as HTTP
 -- | A single trace (such as "user makes a request for a file") is
 -- split into many 'Span's ("find file on disk", "read file", "send
 -- file back")…
-data Span a b = Span
+data Span a = Span
   { -- | The unique integer ID of the trace containing this span. Only
     -- set once we have gathered all the traces for the spans and
     -- we're about to send it. No need to carry it around.
-    _span_trace_id :: !b
+    _span_trace_id :: !Id
     -- | The span integer ID.
   , _span_span_id :: !Id
     -- | The span name
@@ -79,17 +77,10 @@ data Span a b = Span
 type Id = Word64
 
 -- | Span that's currently on-going
-type RunningSpan = Span () ()
+type RunningSpan = Span ()
 
 -- | Span that has finished but is part of a trace that has not.
-type FinishedSpan = Span Word64 ()
-
--- | Span that has finished and been assigned a trace ID along with
--- other spans in the same trace.
-type GroupedSpan = Span Word64 Id
-
--- | A trace is just a collection of spans.
-type Trace = [GroupedSpan]
+type FinishedSpan = Span Word64
 
 -- | Aeson parser options for 'Span's.
 spanOptions :: Aeson.Options
@@ -98,7 +89,7 @@ spanOptions = Aeson.defaultOptions
   , Aeson.omitNothingFields     = True
   }
 
-instance (Aeson.ToJSON a, Aeson.ToJSON b) => Aeson.ToJSON (Span a b) where
+instance Aeson.ToJSON a => Aeson.ToJSON (Span a) where
   toJSON = Aeson.genericToJSON spanOptions
   toEncoding = Aeson.genericToEncoding spanOptions
 
@@ -140,7 +131,7 @@ data DatadogWorkerConfig = DatadogWorkerConfig
     -- channel is full: we're dropping the span and might want to at
     -- least log that. Ideally you should set the other parameters in
     -- such a way that this never fires.
-  , _datadog_on_blocked :: Trace -> IO ()
+  , _datadog_on_blocked :: FinishedSpan -> IO ()
     -- | Sometimes we may want to leave tracing on to get a feel for
     -- how the system will perform with it but not actually send the
     -- traces anywhere.
@@ -153,8 +144,8 @@ data DatadogWorkerConfig = DatadogWorkerConfig
 
 -- | Configuration for a worker writing to user-provided handle.
 data HandleWorkerConfig t = HandleWorkerConfig
-  { -- | Conversion function for traces to 'Text' that we can write out.
-    _handle_worker_serialise :: Trace -> t
+  { -- | Conversion function for to 'Text' that we can write out.
+    _handle_worker_serialise :: FinishedSpan -> t
     -- | Write the serialised trace out.
   , _handle_worker_writer :: t -> IO ()
     -- | Should we serialise the value before we send it to the
@@ -171,8 +162,8 @@ data HandleWorkerConfig t = HandleWorkerConfig
 data UserWorkerConfig = UserWorkerConfig
   { -- | A blocking action that sets up the user worker.
     _user_setup :: IO ()
-    -- | Action processing a trace.
-  , _user_run :: Trace -> IO ()
+    -- | Action processing a span.
+  , _user_run :: FinishedSpan -> IO ()
     -- | A blocking action that tears down the worker.
   , _user_die :: IO ()
   }
@@ -188,20 +179,18 @@ data WorkerConfig where
 data Worker = Worker
   { -- | Kill the worker and wait until it dies.
     _worker_die :: IO ()
-    -- | Invoke the worker on the given trace.
-  , _worker_run :: Trace -> IO ()
+    -- | Invoke the worker on the given span.
+  , _worker_run :: FinishedSpan -> IO ()
   }
 
 -- | State of an on-going trace.
 data TraceState = TraceState
   { -- | Implementation internal environment that tracer uses.
     _trace_worker :: !(Maybe Worker)
-    -- | Stack of spans which haven't finished yet.
-  , _working_spans :: ![RunningSpan]
-    -- | Set of spans which finished but haven't been assigned an
-    -- trace_id yet as there may be more spans in their traces to come
-    -- still.
-  , _finished_spans :: ![FinishedSpan]
+    -- | Trace we're executing under.
+  , _trace_id :: !(Maybe Id)
+    -- | The span we're currently in.
+  , _working_span :: !(Maybe RunningSpan)
   }
 
 -- | Basically MonadState

@@ -25,9 +25,9 @@ import           System.IO
 -- | Commands our handle worker can process.
 data Cmd t =
   -- | Command to write out the given 'Trace'.
-  CmdTrace Trace
+  CmdSpan FinishedSpan
   -- | Command to write out an already-serialised trace.
-  | CmdSerialisedTrace t
+  | CmdSerialisedSpan t
   -- | Command the worker to terminate.
   | CmdDie
 
@@ -59,8 +59,8 @@ mkHandleWorker cfg = do
   flip Catch.onException (killWorker worker inCh) $ do
     let sendWrite = void . U.tryWriteChan inCh
         sendWrite' = if _handle_worker_serialise_before_send cfg
-                     then sendWrite . CmdTrace
-                     else sendWrite . CmdSerialisedTrace . _handle_worker_serialise cfg
+                     then sendWrite . CmdSpan
+                     else sendWrite . CmdSerialisedSpan . _handle_worker_serialise cfg
     return $! Worker
       { _worker_run = sendWrite'
       , _worker_die = killWorker worker inCh
@@ -73,8 +73,8 @@ mkHandleWorker cfg = do
 
     writeLoop :: U.OutChan (Cmd t) -> IO ()
     writeLoop outCh = U.readChan outCh >>= \case
-      CmdTrace t -> do
-        _handle_worker_writer cfg $ _handle_worker_serialise cfg t
+      CmdSpan s -> do
+        _handle_worker_writer cfg $ _handle_worker_serialise cfg s
         writeLoop outCh
-      CmdSerialisedTrace t -> _handle_worker_writer cfg t >> writeLoop outCh
+      CmdSerialisedSpan s -> _handle_worker_writer cfg s >> writeLoop outCh
       CmdDie -> return ()

@@ -69,8 +69,8 @@ main = do
           liftIO $ step "Bottom level"
       doSpan "sleep" $ do
         liftIO $ threadDelay 2000000
-    -- Two workers sending 2 requests each, 4 requests.
-    STM.atomically $ STM.readTVar counter >>= STM.check . (== 4)
+    -- Two workers sending 3 spans each, 1 per request, 6 requests.
+    STM.atomically $ STM.readTVar counter >>= STM.check . (== 6)
   where
     mkSpanInfo qual = Trace.SpanInfo
       { Trace._span_info_name = qual <> "-span"

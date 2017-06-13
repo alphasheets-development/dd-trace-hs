@@ -35,7 +35,7 @@ import qualified Control.Monad.Trans.Class as T
 import           Data.Foldable (for_)
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import           Data.Maybe (fromMaybe, listToMaybe)
+import           Data.Maybe (fromMaybe)
 import           Data.Monoid (mempty)
 import           Data.Text (Text)
 import           Network.Datadog.Trace.Types
@@ -74,8 +74,8 @@ withTracing
 withTracing mWorkerCfg act =
   Catch.bracket (startTracing mWorkerCfg) stopTracing $ \mWorker -> do
     act $ TraceState { _trace_worker = mWorker
-                     , _working_spans = mempty
-                     , _finished_spans = mempty
+                     , _trace_id = Nothing
+                     , _working_span = Nothing
                      }
 
 -- | @whenDisabled act1 act2@
@@ -91,17 +91,30 @@ whenDisabled onDisabled onEnabled = _trace_worker <$> askTraceState >>= \case
 --
 -- Subject to '_trace_enabled'.
 span :: (Catch.MonadMask m, MonadTrace m, MonadIO m) => SpanInfo -> m a -> m a
-span i act = whenDisabled act $ Catch.bracket_ (startSpan i) endSpan act
+span i act = whenDisabled act $ do
+  -- If we don't have a trace, make a new one. If we do, use it.
+  tState <- askTraceState
+  traceId <- case _trace_id tState of
+    Nothing -> liftIO Random.randomIO
+    Just tId -> return tId
+  -- Run the user's action then possibly recover old state. Recovering
+  -- old state resets trace ID which is useful at top level but it
+  -- also "pops" a span off. This means everything should just work
+  -- for nested spans. It also makes things work in forked contexts
+  -- where the the spans in the fork are children of the calling
+  -- thread's span. This works fine because we don't have to
+  -- back-propagate any state from inside the fork, we only ever pass
+  -- state down.
+  Catch.bracket (startSpan i traceId) endSpan (\_ -> act)
+    `Catch.finally` modifyTraceState (\_ -> tState)
 
 -- | Modify the span we're currently inside of. If we're not in the
 -- span, does nothing. Subject to '_trace_enabled'.
 modifySpan :: (Monad m, MonadTrace m) => (RunningSpan -> RunningSpan) -> m ()
 modifySpan f = whenDisabled (return ()) $ modifyTraceState $ \state ->
-  state { _working_spans = case _working_spans state of
-            -- We're not in a span, do nothing. We could warn I
-            -- guess but _shrug_.
-            [] -> _working_spans state
-            s : ss -> f s : ss
+  state { _working_span = case _working_span state of
+            Nothing -> Nothing
+            Just s -> Just $! f s
         }
 
 -- | Signal that something went on during this trace. This is
@@ -153,15 +166,16 @@ stopTracing w = for_ w $ liftIO . _worker_die
 startSpan
   :: (MonadIO m, MonadTrace m)
   => SpanInfo
-  -> m ()
-startSpan info = do
+  -> Id -- ^ Trace ID
+  -> m RunningSpan
+startSpan info traceId = do
   -- Find parent if any.
-  parent_span_id <- fmap _span_span_id . listToMaybe . _working_spans <$> askTraceState
+  parent_span_id <- fmap _span_span_id . _working_span <$> askTraceState
   -- Now that we asked for a parent, put ourselves on top so that
   -- nested spans see us as the parent.
   span_id <- liftIO Random.randomIO
   startTime <- liftIO $ Clock.getTime Clock.Realtime
-  let s = Span { _span_trace_id = ()
+  let s = Span { _span_trace_id = traceId
                , _span_span_id = span_id
                , _span_name = _span_info_name info
                , _span_resource = _span_info_resource info
@@ -174,46 +188,18 @@ startSpan info = do
                , _span_meta = Nothing
                , _span_metrics = Nothing
                }
-  modifyTraceState $ \state -> state { _working_spans = s : _working_spans state }
+  modifyTraceState $ \state -> state { _working_span = Just s }
+  return s
 
 -- | Stop timing a span. If it's the end a trace, push the trace to
 -- the worker.
-endSpan :: (MonadIO m, MonadTrace m) => m ()
-endSpan = do
+endSpan :: (MonadIO m, MonadTrace m) => RunningSpan -> m ()
+endSpan s = do
   !endTime <- liftIO $ Clock.getTime Clock.Realtime
-  askTraceState >>= \state -> case _working_spans state of
-    -- We really shouldn't be in here... Something popped off too much stuff...
-    [] -> return ()
-    s : restSpans -> do
-      let !finishedSpan = s { _span_duration = fromIntegral (Clock.toNanoSecs endTime) - _span_start s }
-
-      case restSpans of
-        -- If we have no more spans on the stack, we were a top level
-        -- span and we just finished. Send everything we possibly
-        -- accumulated to the workers and keep going.
-        [] -> do
-        -- Clear state ASAP so GHC can release any memory it deems it
-        -- doesn't need for the worker.
-          modifyTraceState $ \st' -> st' { _working_spans = mempty
-                                         , _finished_spans = mempty }
-
-          -- Now that we have the full group of spans in the trace,
-          -- give it some trace ID and send it off.
-          trace' :: Trace <- do
-            traceId <- liftIO Random.randomIO
-            return $ map (\fs -> fs { _span_trace_id = traceId })
-                         (finishedSpan : _finished_spans state)
-
-          -- Send trace off.
-          liftIO . for_ (_trace_worker state) $ \w -> _worker_run w trace'
-
-        -- We do still have working spans, just remember to pop off
-        -- the one we just worked on and to add it to finished
-        -- collection and be on our way
-        _ -> modifyTraceState $ \st' ->
-          st' { _working_spans = restSpans
-              , _finished_spans = finishedSpan : _finished_spans st'
-              }
+  let !finishedSpan = s { _span_duration = fromIntegral (Clock.toNanoSecs endTime) - _span_start s }
+  -- Send span off.
+  worker <- _trace_worker <$> askTraceState
+  liftIO . for_ worker $ \w -> _worker_run w finishedSpan
 
 -- | Default implementation for 'askTraceState' for 'T.MonadTrans'.
 defaultAskTraceState

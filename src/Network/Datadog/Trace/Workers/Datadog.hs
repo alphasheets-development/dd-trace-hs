@@ -31,7 +31,7 @@ import qualified Network.HTTP.Types as HTTP
 -- | Commands datadog agent workers can process.
 data Cmd =
   -- | Command to write out the given 'Trace'.
-  CmdTrace Trace
+  CmdSpan FinishedSpan
   -- | Command the worker to terminate.
   | CmdDie
 
@@ -69,7 +69,7 @@ mkDatadogWorker cfg = do
                      then U.writeChan inCh x >> return True
                      else U.tryWriteChan inCh x
     return $! Worker
-      { _worker_run = \t -> runWrite (CmdTrace t) >>= \b -> do
+      { _worker_run = \t -> runWrite (CmdSpan t) >>= \b -> do
           unless b $ _datadog_on_blocked cfg t
       , _worker_die = killWorkers workers inCh
       }
@@ -88,13 +88,15 @@ mkDatadogWorker cfg = do
 
     writeLoop :: U.OutChan Cmd -> IO ()
     writeLoop outCh = U.readChan outCh >>= \case
-      CmdTrace t -> runSend t >> writeLoop outCh
+      CmdSpan t -> runSend t >> writeLoop outCh
       CmdDie -> return ()
 
-    runSend :: Trace -> IO ()
+    -- TODO: We could do work batching instead of going 1 span at a
+    -- time. Consider it. Write benchmarks first.
+    runSend :: FinishedSpan -> IO ()
     runSend _ | not $ _datadog_do_writes cfg = return ()
-    runSend t = runResourceT $ do
-      let req' = HTTP.setRequestBodyJSON [t] (_datadog_request cfg)
+    runSend s = runResourceT $ do
+      let req' = HTTP.setRequestBodyJSON [[s]] (_datadog_request cfg)
           req'' = req'
                   { -- TODO: If charset is set in content-type, connection
                     -- fails completely. Investigate if Haskell is failing
@@ -104,7 +106,7 @@ mkDatadogWorker cfg = do
                                         : filter (\(h, _) -> h /= HTTP.hContentType)
                                                  (HTTP.requestHeaders req')
                   }
-      debug $ fromString "Sending following trace: " <> Text.pack (show t)
+      debug $ fromString "Sending following span: " <> Text.pack (show s)
       void (HTTP.httpNoBody req'') `Catch.catch`
         (\(e :: Catch.SomeException) -> debug $ fromString "Exception on send: " <> Text.pack (show e))
       where
