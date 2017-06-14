@@ -16,4 +16,5 @@ nullWorkerConfig = UserWorker $! UserWorkerConfig
   { _user_setup = return ()
   , _user_run = \_ -> return ()
   , _user_die = return ()
+  , _user_exception = \_ -> return Fatal
   }

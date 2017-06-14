@@ -25,15 +25,18 @@ library
                      , clock
                      , containers
                      , exceptions
+                     , http-client
                      , http-conduit
                      , http-types
                      , random
                      , resourcet
+                     , stm
                      , text
                      , transformers
                      , unagi-chan
+                     , vector
   default-language:    Haskell2010
-  ghc-options:         -Wall -Werror
+  ghc-options:         -Wall -Werror -O2
 
 test-suite dd-trace-hs-test
   type:                exitcode-stdio-1.0

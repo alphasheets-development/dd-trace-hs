@@ -10,17 +10,21 @@ module Network.Datadog.Trace.Workers.Handle
   ( defaultHandleWorkerConfig
   , mkHandleWorker
   , HandleWorkerConfig(..)
+  , HandleWorkerDeadException(..)
   ) where
 
 import qualified Control.Concurrent.Async as Async
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
+import qualified Control.Concurrent.STM as STM
 import           Control.Monad (void)
 import qualified Control.Monad.Catch as Catch
 import qualified Data.Aeson.Text as Aeson
 import qualified Data.Text.Lazy as TextLazy
 import qualified Data.Text.Lazy.IO as TextLazy
+import           Data.Typeable (Typeable)
 import           Network.Datadog.Trace.Types
 import           System.IO
+import           Text.Printf (printf)
 
 -- | Commands our handle worker can process.
 data Cmd t =
@@ -40,7 +44,19 @@ defaultHandleWorkerConfig h = HandleWorkerConfig
   { _handle_worker_serialise = Aeson.encodeToLazyText
   , _handle_worker_writer = TextLazy.hPutStrLn h
   , _handle_worker_serialise_before_send = False
+  , _handle_worker_on_exception = \e workerDie -> do
+      TextLazy.putStrLn . TextLazy.pack $ printf
+        "Span failed to write due to '%s'." (show e)
+      workerDie
+      return Fatal
   }
+
+-- | The handle worker is no longer accepting writes and is considered
+-- dead.
+data HandleWorkerDeadException = HandleWorkerDeadException
+  deriving (Show, Eq, Typeable)
+
+instance Catch.Exception HandleWorkerDeadException where
 
 -- | Handle worker using a fast unagi channel to provide non-blocking
 -- (to the user) sequential file writing. This means the user only
@@ -55,22 +71,28 @@ defaultHandleWorkerConfig h = HandleWorkerConfig
 mkHandleWorker :: forall t. HandleWorkerConfig t -> IO Worker
 mkHandleWorker cfg = do
   (inCh, outCh) <- U.newChan 4096
-  worker <- Async.async $ writeLoop outCh
-  flip Catch.onException (killWorker worker inCh) $ do
-    let sendWrite = void . U.tryWriteChan inCh
-        sendWrite' = if _handle_worker_serialise_before_send cfg
-                     then sendWrite . CmdSpan
-                     else sendWrite . CmdSerialisedSpan . _handle_worker_serialise cfg
-    return $! Worker
-      { _worker_run = sendWrite'
-      , _worker_die = killWorker worker inCh
-      }
-  where
-    killWorker :: Async.Async () -> U.InChan (Cmd t) -> IO ()
-    killWorker w inCh = do
-      U.writeChan inCh CmdDie
-      void $ Async.waitCatch w
+  isDead <- STM.newTVarIO False
+  let workerDie = do
+        U.writeChan inCh CmdDie
+        STM.atomically $ STM.readTVar isDead >>= STM.check . (== True)
 
+  _ <- Async.async $ writeLoop outCh `Catch.catch` \e -> do
+    STM.atomically $ STM.writeTVar isDead True
+    void $ _handle_worker_on_exception cfg e workerDie
+
+  let sendWrite = void . U.tryWriteChan inCh
+      sendWrite' = if _handle_worker_serialise_before_send cfg
+                   then sendWrite . CmdSpan
+                   else sendWrite . CmdSerialisedSpan . _handle_worker_serialise cfg
+  return $! Worker
+    { _worker_run = \t -> STM.atomically (STM.readTVar isDead) >>= \case
+        False -> sendWrite' t
+        True -> Catch.throwM HandleWorkerDeadException
+    , _worker_die = workerDie
+    , _worker_exception = \e -> _handle_worker_on_exception cfg e workerDie
+    , _worker_in_flight = Just 0
+    }
+  where
     writeLoop :: U.OutChan (Cmd t) -> IO ()
     writeLoop outCh = U.readChan outCh >>= \case
       CmdSpan s -> do

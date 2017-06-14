@@ -11,20 +11,24 @@
 -- Types used throughout dd-trace-hs. Most useful things are
 -- re-exported in @Network.Datadog.Trace@.
 module Network.Datadog.Trace.Types
-  ( FinishedSpan
+  ( Fatality(..)
+  , DatadogWorkerConfig(..)
+  , FinishedSpan
+  , HandleWorkerConfig(..)
   , Id
   , MonadTrace(..)
   , RunningSpan
   , Span(..)
   , SpanInfo(..)
+  , StartedWorker(..)
   , TraceState(..)
-  , DatadogWorkerConfig(..)
-  , HandleWorkerConfig(..)
+  , UserWorkerConfig(..)
   , Worker(..)
   , WorkerConfig(..)
-  , UserWorkerConfig(..)
   ) where
 
+import qualified Control.Concurrent.STM as STM
+import qualified Control.Monad.Catch as Catch
 import qualified Control.Monad.Trans.Class as T
 import qualified Control.Monad.Trans.Reader as Reader
 import qualified Control.Monad.Trans.State.Lazy as StateLazy
@@ -33,17 +37,16 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import           Data.Map.Strict (Map)
 import           Data.Text (Text)
+import           Data.Vector (Vector)
 import           Data.Word (Word8, Word64)
 import           GHC.Generics (Generic)
 import qualified Network.HTTP.Simple as HTTP
 
 -- | A single trace (such as "user makes a request for a file") is
 -- split into many 'Span's ("find file on disk", "read file", "send
--- file back")…
+-- file back", ...).
 data Span a = Span
-  { -- | The unique integer ID of the trace containing this span. Only
-    -- set once we have gathered all the traces for the spans and
-    -- we're about to send it. No need to carry it around.
+  { -- | The unique integer ID of the trace containing this span.
     _span_trace_id :: !Id
     -- | The span integer ID.
   , _span_span_id :: !Id
@@ -73,7 +76,7 @@ data Span a = Span
   , _span_metrics :: !(Maybe (Map Text Text))
   } deriving (Show, Eq, Ord, Generic)
 
--- | IDs for traces, spans, ….
+-- | IDs for traces, spans, ...
 type Id = Word64
 
 -- | Span that's currently on-going
@@ -105,6 +108,11 @@ data SpanInfo = SpanInfo
   , -- | '_span_type'.
     _span_info_type :: !Text
   } deriving (Show, Eq, Ord)
+
+-- | Determines whether the exception received by the worker was fatal
+-- or not. If it was fatal, the worker should be synchronously cleaned
+-- up and 'Fatal' returned.
+data Fatality = Fatal | NonFatal
 
 -- | Worker sending data to a datadog trace agent.
 data DatadogWorkerConfig = DatadogWorkerConfig
@@ -138,8 +146,19 @@ data DatadogWorkerConfig = DatadogWorkerConfig
   , _datadog_do_writes :: !Bool
     -- | Custom trace debug callback
   , _datadog_debug_callback :: Text -> IO ()
-    -- | Print debug info when sending traces?
+    -- | Print debug info when sending traces? Uses '_datadog_do_writes'.
   , _datadog_debug :: !Bool
+    -- | Configurable '_worker_exception'. This is just the logging
+    -- part. Death will be handled by the worker itself. See also
+    -- '_datadog_die_on_exception'.
+    --
+    -- An action that asks the the remaining worker threads to finish
+    -- their work is provided should you wish to use it.
+  , _datadog_on_exception :: Catch.SomeException -> IO () -> IO Fatality
+    -- | Action to run after the span has been sent. Used mostly for
+    -- testing but could be used for logging as well. Blocks the
+    -- thread that performed the send.
+  , _datadog_post_send :: FinishedSpan -> IO ()
   }
 
 -- | Configuration for a worker writing to user-provided handle.
@@ -155,6 +174,14 @@ data HandleWorkerConfig t = HandleWorkerConfig
     -- handle is taking a while, it's can be more beneficial to keep
     -- the serialised form in memory rather than the trace itself.
   , _handle_worker_serialise_before_send :: !Bool
+    -- | What should we do on exception to the handle worker? See
+    -- '_worker_exception'. As usual, the worker finalisation does not
+    -- close the handle, it is up to the user to do so in their
+    -- program or inside this handler.
+    --
+    -- An action which stops the worker threads is provided should you
+    -- wish to use it for teardown.
+  , _handle_worker_on_exception :: Catch.SomeException -> IO () -> IO Fatality
   }
 
 -- | User-provided trace handler. Close over any state you need to
@@ -166,6 +193,10 @@ data UserWorkerConfig = UserWorkerConfig
   , _user_run :: FinishedSpan -> IO ()
     -- | A blocking action that tears down the worker.
   , _user_die :: IO ()
+    -- | See '_worker_exception'. '_user_die' or any other teardown
+    -- will not be called for you, it is up to the user to decide
+    -- whether the exception is fatal and how to clean up.
+  , _user_exception :: Catch.SomeException -> IO Fatality
   }
 
 -- | Workers process traces and decide what to do with them.
@@ -177,16 +208,44 @@ data WorkerConfig where
 -- | The implementation of the "thing" actually processing the traces:
 -- writing to file, sending elsewhere, discarding...
 data Worker = Worker
-  { -- | Kill the worker and wait until it dies.
+  { -- | Kill the worker and wait until it dies. If `_worker_die`
+    -- throws an exception, the worker is marked as dead.
+    --
+    -- It should be harmless to invoke '_worker_die' multiple times.
     _worker_die :: IO ()
-    -- | Invoke the worker on the given span.
+    -- | Invoke the worker on the given span. Must be OK to run on a
+    -- dead worker: your worker should make sure it's able to write
+    -- the message or discard it if the worker is considered
+    -- dead/dying. Any exceptions thrown by '_worker_run' are passed
+    -- to '_worker_exception'. Asynchronous.
   , _worker_run :: FinishedSpan -> IO ()
+    -- | Worker threw the given exception during '_worker_run'.
+    -- Depending on worker implementation, this might not be directly
+    -- related to the span that was being processed at the time: for
+    -- example, a worker that uses threads to process spans might have
+    -- died some time in the past and we only find out about it now on
+    -- write.
+    --
+    -- If the exception is fatal, it is up to the user to perform a
+    -- blocking clean-up operation and report 'Fatal'. Once the report
+    -- is made, no more messages will be given to the worker. It is
+    -- likely that messages will arrive during clean-up: the worker
+    -- should handle this.
+  , _worker_exception :: Catch.SomeException -> IO Fatality
+    -- | How many messages does this worker have in-flight? If
+    -- 'Nothing', the worker no longer accepts any messages.
+  , _worker_in_flight :: !(Maybe Word64)
   }
+
+-- | A started worker is a pair of 'Worker' as well as a count of how
+-- many messages it has left to process. This count allows us to know
+-- when it's OK to tear down worker without losing any unsent spans.
+newtype StartedWorker = StartedWorker (STM.TVar (Maybe Worker))
 
 -- | State of an on-going trace.
 data TraceState = TraceState
   { -- | Implementation internal environment that tracer uses.
-    _trace_worker :: !(Maybe Worker)
+    _trace_workers :: !(Vector StartedWorker)
     -- | Trace we're executing under.
   , _trace_id :: !(Maybe Id)
     -- | The span we're currently in.

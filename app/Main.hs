@@ -38,6 +38,7 @@ runTracerM (Tracer act) = do
         { Trace._user_setup = return ()
         , Trace._user_run = IORef.modifyIORef' tracesRef . (:)
         , Trace._user_die = return ()
+        , Trace._user_exception = \_ -> return Trace.Fatal
         }
   Trace.withTracing [ioRefWorker] $ \state -> liftIO $ do
     _ <- T.runStateT act state
