@@ -202,7 +202,10 @@ startSpan info traceId = do
   -- Now that we asked for a parent, put ourselves on top so that
   -- nested spans see us as the parent.
   span_id <- liftIO Random.randomIO
+  -- DataDog wants a epoch timestamp for their UI but we need a
+  -- monotonic time to measure the duration interval. So we get both.
   startTime <- liftIO $ Clock.getTime Clock.Realtime
+  startTimeMonotonic <- liftIO $ Clock.getTime Clock.Monotonic
   let s = Span { _span_trace_id = traceId
                , _span_span_id = span_id
                , _span_name = _span_info_name info
@@ -210,6 +213,7 @@ startSpan info traceId = do
                , _span_service = _span_info_service info
                , _span_type = _span_info_type info
                , _span_start = fromIntegral $ Clock.toNanoSecs startTime
+               , _span_start_monotonic = fromIntegral $ Clock.toNanoSecs startTimeMonotonic
                , _span_duration = ()
                , _span_parent_id = parent_span_id
                , _span_error = Nothing
@@ -224,8 +228,8 @@ startSpan info traceId = do
 -- in-flight messages for each sender.
 endSpan :: (MonadIO m, MonadTrace m) => RunningSpan -> m ()
 endSpan s = do
-  !endTime <- liftIO $ Clock.getTime Clock.Realtime
-  let !finishedSpan = s { _span_duration = fromIntegral (Clock.toNanoSecs endTime) - _span_start s }
+  !endTime <- liftIO $ Clock.getTime Clock.Monotonic
+  let !finishedSpan = s { _span_duration = fromIntegral (Clock.toNanoSecs endTime) - _span_start_monotonic s }
   -- Send span off to all the workers. Do nothing alse as 'span' will
   -- take care of resetting the state.
   workers <- _trace_workers <$> askTraceState

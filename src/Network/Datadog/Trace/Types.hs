@@ -60,6 +60,8 @@ data Span a = Span
   , _span_type :: !Text
     -- | The start time of the request in nanoseconds from the unix epoch.
   , _span_start :: !Word64
+    -- | The start time of the request in monotonic nanoseconds (to measure the duration).
+  , _span_start_monotonic :: !Word64
     -- | The duration of the request in nanoseconds.
   , _span_duration :: !a
     -- | The span integer ID of the parent span.
