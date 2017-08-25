@@ -210,7 +210,6 @@ startSpan info traceId = do
                , _span_service = _span_info_service info
                , _span_type = _span_info_type info
                , _span_start = fromIntegral $ Clock.toNanoSecs startTime
-               , _span_start_monotonic = fromIntegral $ Clock.toNanoSecs startTimeMonotonic
                , _span_duration = ()
                , _span_parent_id = parent_span_id
                , _span_error = Nothing
