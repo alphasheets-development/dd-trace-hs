@@ -224,8 +224,8 @@ startSpan info traceId = do
 -- in-flight messages for each sender.
 endSpan :: (MonadIO m, MonadTrace m) => RunningSpan -> m ()
 endSpan s = do
-  !curTime <- liftIO $ Clock.getTime Clock.Realtime
   !endTime <- liftIO $ Clock.getTime Clock.Monotonic
+  !curTime <- liftIO $ Clock.getTime Clock.Realtime
   let
     !duration = fromIntegral (Clock.toNanoSecs endTime) - _span_start s
     !finishedSpan = s { _span_duration = duration
