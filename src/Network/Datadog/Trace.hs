@@ -202,7 +202,7 @@ startSpan info traceId = do
   -- Now that we asked for a parent, put ourselves on top so that
   -- nested spans see us as the parent.
   span_id <- liftIO Random.randomIO
-  startTime <- liftIO $ Clock.getTime Clock.Realtime
+  startTime <- liftIO $ Clock.getTime Clock.Monotonic
   let s = Span { _span_trace_id = traceId
                , _span_span_id = span_id
                , _span_name = _span_info_name info
@@ -224,8 +224,14 @@ startSpan info traceId = do
 -- in-flight messages for each sender.
 endSpan :: (MonadIO m, MonadTrace m) => RunningSpan -> m ()
 endSpan s = do
-  !endTime <- liftIO $ Clock.getTime Clock.Realtime
-  let !finishedSpan = s { _span_duration = fromIntegral (Clock.toNanoSecs endTime) - _span_start s }
+  !endTime <- liftIO $ Clock.getTime Clock.Monotonic
+  !curTime <- liftIO $ Clock.getTime Clock.Realtime
+  let
+    !duration = fromIntegral (Clock.toNanoSecs endTime) - _span_start s
+    !finishedSpan = s { _span_duration = duration
+                      -- restore span_start based on the epoch timestamp
+                      , _span_start = fromIntegral (Clock.toNanoSecs curTime) - duration
+                      }
   -- Send span off to all the workers. Do nothing alse as 'span' will
   -- take care of resetting the state.
   workers <- _trace_workers <$> askTraceState
