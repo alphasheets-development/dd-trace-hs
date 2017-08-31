@@ -91,27 +91,30 @@ data DatadogWorkerConfig = DatadogWorkerConfig
 
 -- | Make a 'DatadogWorkerConfig' with default settings. This assumes trace
 -- agent is running locally on default port.
-defaultDatadogWorkerConfig :: IO DatadogWorkerConfig
-defaultDatadogWorkerConfig = do
-  req <- HTTP.parseRequest "http://localhost:8126/v0.3/traces"
-  return $! DatadogWorkerConfig
-    { _datadog_request = req { HTTP.method = HTTP.methodPut }
-    , _datadog_number_of_workers = 8
-    , _datadog_blocking = False
-      -- We shouldn't really be hitting so many traces accumulating
-      -- unless we have some non-child span in tight loop...
-    , _datadog_chan_bound = 4092
-    , _datadog_on_blocked = \s -> do
-        putStrLn $ "Span channel full, dropping " <> show s
-    , _datadog_do_writes = True
-    , _datadog_debug_callback = Text.putStrLn
-    , _datadog_debug = False
-    , _datadog_on_exception = \e workerDie -> do
-        printf "Span failed to send due to '%s'." (show e)
-        workerDie
-        return Fatal
-    , _datadog_post_send = \_ -> return ()
-    }
+defaultDatadogWorkerConfig :: DatadogWorkerConfig
+defaultDatadogWorkerConfig = DatadogWorkerConfig
+  { _datadog_request = HTTP.setRequestSecure False
+                     . HTTP.setRequestHost "localhost"
+                     . HTTP.setRequestPort 8126
+                     . HTTP.setRequestPath "v0.3/traces"
+                     . HTTP.setRequestMethod HTTP.methodPut
+                     $ HTTP.defaultRequest
+  , _datadog_number_of_workers = 8
+  , _datadog_blocking = False
+    -- We shouldn't really be hitting so many traces accumulating
+    -- unless we have some non-child span in tight loop...
+  , _datadog_chan_bound = 4096
+  , _datadog_on_blocked = \s -> do
+      putStrLn $ "Span channel full, dropping " <> show s
+  , _datadog_do_writes = True
+  , _datadog_debug_callback = Text.putStrLn
+  , _datadog_debug = False
+  , _datadog_on_exception = \e workerDie -> do
+      printf "Span failed to send due to '%s'." (show e)
+      workerDie
+      return Fatal
+  , _datadog_post_send = \_ -> return ()
+  }
 
 -- | Internal worker state used to determine when the worker stops
 -- being available.
