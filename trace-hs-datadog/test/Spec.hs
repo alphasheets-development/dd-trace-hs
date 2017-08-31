@@ -5,7 +5,7 @@ module Main (main) where
 
 import           Control.Concurrent (forkIO, threadDelay)
 import qualified Control.Concurrent.STM as STM
-import           Control.Monad (replicateM_)
+import           Control.Monad (replicateM_, replicateM)
 import qualified Control.Monad.Base as Base
 import qualified Control.Monad.Catch as Catch
 import           Control.Monad.IO.Class (MonadIO(..))
@@ -43,7 +43,7 @@ runTracerM :: Int -- ^ Port to listen on
            -> STM.TVar (Maybe String)
            -> Tracer a -> IO a
 runTracerM port workerCount tCounter diedVar (Tracer act) = do
-  let configs = Prelude.replicate workerCount $ Trace.defaultDatadogWorkerConfig
+  let config = Trace.defaultDatadogWorkerConfig
         { Trace._datadog_request =
               HTTP.setRequestPort port
             $ Trace._datadog_request Trace.defaultDatadogWorkerConfig
@@ -56,9 +56,9 @@ runTracerM port workerCount tCounter diedVar (Tracer act) = do
             killWorkers
             return Trace.Fatal
         }
-      -- Run datadog tracer twice to test multiple workers actually work.
-  workers <- mapM (fmap Trace.UserWorker . Trace.mkDatadogWorker) configs
-  Trace.withTracing workers $ T.evalStateT act
+  -- Run datadog tracer twice to test multiple workers actually work.
+  workerConfigs <- replicateM workerCount $ Trace.mkDatadogWorker config
+  Trace.withTracing workerConfigs $ T.evalStateT act
 
 mkOK :: Wai.Application
 mkOK _req respond = respond $ Wai.responseLBS HTTP.status200 [] "OK"

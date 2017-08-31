@@ -36,11 +36,11 @@ instance Trace.MonadTrace Tracer where
 runTracerM :: (Catch.MonadMask m, MonadIO m) => Tracer a -> m [Trace.FinishedSpan]
 runTracerM (Tracer act) = do
   tracesRef <- liftIO $ IORef.newIORef []
-  let ioRefWorker = Trace.UserWorker $! Trace.UserWorkerConfig
-        { Trace._user_setup = return ()
-        , Trace._user_run = IORef.modifyIORef' tracesRef . (:)
-        , Trace._user_die = return ()
-        , Trace._user_exception = \_ -> return Trace.Fatal
+  let ioRefWorker = Trace.WorkerConfig
+        { Trace._wc_setup = return ()
+        , Trace._wc_run = IORef.modifyIORef' tracesRef . (:)
+        , Trace._wc_die = return ()
+        , Trace._wc_exception = \_ -> return Trace.Fatal
         }
   Trace.withTracing [ioRefWorker] $ \state -> liftIO $ do
     _ <- T.runStateT act state

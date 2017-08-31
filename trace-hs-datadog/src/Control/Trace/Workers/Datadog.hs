@@ -33,14 +33,12 @@ import qualified Network.HTTP.Simple as HTTP
 import qualified Network.HTTP.Types as HTTP
 import           Text.Printf (printf)
 
-
 -- | Commands datadog agent workers can process.
 data Cmd =
   -- | Command to write out the given 'Trace'.
-  CmdSpan FinishedSpan
+  CmdSpan !FinishedSpan
   -- | Command the worker to terminate.
   | CmdDie
-
 
 -- | Worker sending data to a datadog trace agent.
 data DatadogWorkerConfig = DatadogWorkerConfig
@@ -131,7 +129,7 @@ instance Catch.Exception DatadogWorkerDeadException where
 -- internal channel to which traces are written and send them using
 -- '_datadog_request' to the specified datadog agent. The agent itself
 -- is in charge of sending the traces on to Datadog.
-mkDatadogWorker :: DatadogWorkerConfig -> IO UserWorkerConfig
+mkDatadogWorker :: DatadogWorkerConfig -> IO WorkerConfig
 mkDatadogWorker cfg = do
   (inCh, outCh) <- U.newChan (_datadog_chan_bound cfg)
   statusVar <- STM.newTVarIO Alive
@@ -151,8 +149,8 @@ mkDatadogWorker cfg = do
                    then U.writeChan inCh x >> return True
                    else U.tryWriteChan inCh x
 
-  return $! UserWorkerConfig
-    { _user_setup = do
+  return $! WorkerConfig
+    { _wc_setup = do
         workerCountVar <- STM.newTVarIO (0 :: Word64)
         replicateM_ (_datadog_number_of_workers cfg) $ do
           STM.atomically $ STM.modifyTVar' workerCountVar succ
@@ -164,13 +162,13 @@ mkDatadogWorker cfg = do
                     _ -> Degraded
             (writeLoop outCh `Catch.finally` workerDied) `Catch.catch` \e -> do
               void $ _datadog_on_exception cfg e killWorkers
-    , _user_run = \t -> STM.atomically (STM.readTVar statusVar) >>= \case
+    , _wc_run = \t -> STM.atomically (STM.readTVar statusVar) >>= \case
         Dead -> Catch.throwM DatadogWorkerDeadException
         -- Write on degraded and alive.
         _ -> runWrite (CmdSpan t) >>= \b -> do
           unless b $ _datadog_on_blocked cfg t
-    , _user_die = killWorkers
-    , _user_exception = \e -> _datadog_on_exception cfg e killWorkers
+    , _wc_die = killWorkers
+    , _wc_exception = \e -> _datadog_on_exception cfg e killWorkers
     }
   where
     writeLoop :: U.OutChan Cmd -> IO ()

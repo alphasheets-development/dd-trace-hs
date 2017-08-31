@@ -12,14 +12,10 @@
 -- required format before being processed further.
 module Control.Trace
   ( Control.Trace.Types.Fatality(..)
-  , Control.Trace.Types.HandleWorkerConfig(..)
   , Control.Trace.Types.MonadTrace(..)
   , Control.Trace.Types.SpanInfo(..)
   , Control.Trace.Types.TraceState(..)
-  , Control.Trace.Types.UserWorkerConfig(..)
   , Control.Trace.Types.WorkerConfig(..)
-  , Control.Trace.Workers.Handle.defaultHandleWorkerConfig
-  , Control.Trace.Workers.Null.nullWorkerConfig
   , Control.Trace.defaultAskTraceState
   , Control.Trace.defaultModifyTraceState
   , Control.Trace.modifySpanMeta
@@ -36,12 +32,10 @@ import qualified Control.Monad.Catch as Catch
 import           Control.Monad.IO.Class (liftIO, MonadIO(..))
 import qualified Control.Monad.Trans.Class as T
 import           Control.Trace.Types
-import qualified Control.Trace.Workers.Handle
-import qualified Control.Trace.Workers.Null
 import           Data.Foldable (for_, Foldable(toList))
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import           Data.Maybe (fromMaybe)
+import           Data.Maybe (fromMaybe, isJust)
 import           Data.Monoid (mempty)
 import           Data.Text (Text)
 import           Data.Traversable (Traversable)
@@ -97,9 +91,7 @@ whenDisabled onDisabled onEnabled = _trace_workers <$> askTraceState >>= \v ->
     False -> onDisabled
     True -> onEnabled
   where
-    isLive (StartedWorker w) = liftIO $ STM.readTVarIO w >>= return . \case
-      Nothing -> False
-      Just{} -> True
+    isLive (StartedWorker w) = liftIO $ isJust <$> STM.readTVarIO w
 
 -- | Tag the given action with a trace. Once the action exits, the
 -- trace ends and is queued for sending.
@@ -154,14 +146,11 @@ startTracing :: (MonadIO m, Traversable t) => t WorkerConfig -> m (t StartedWork
 startTracing = liftIO . Async.mapConcurrently mkWorker
   where
     mkWorker config = do
-      !w <- case config of
-        HandleWorker hCfg -> Control.Trace.Workers.Handle.mkHandleWorker hCfg
-        UserWorker uCfg -> do
-          _user_setup uCfg
-          return $! Worker { _worker_run = _user_run uCfg
-                           , _worker_die = _user_die uCfg
-                           , _worker_exception = _user_exception uCfg
-                           , _worker_in_flight = Just 0 }
+      _wc_setup config
+      let !w = Worker { _worker_run = _wc_run config
+                      , _worker_die = _wc_die config
+                      , _worker_exception = _wc_exception config
+                      , _worker_in_flight = Just 0 }
       StartedWorker <$> STM.newTVarIO (Just w)
 
 -- | Invoke '_worker_die' on every worker. Blocking. Workers that

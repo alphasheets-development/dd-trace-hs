@@ -13,7 +13,6 @@
 module Control.Trace.Types
   ( Fatality(..)
   , FinishedSpan
-  , HandleWorkerConfig(..)
   , Id
   , MonadTrace(..)
   , RunningSpan
@@ -21,7 +20,6 @@ module Control.Trace.Types
   , SpanInfo(..)
   , StartedWorker(..)
   , TraceState(..)
-  , UserWorkerConfig(..)
   , Worker(..)
   , WorkerConfig(..)
   ) where
@@ -112,48 +110,19 @@ data SpanInfo = SpanInfo
 -- up and 'Fatal' returned.
 data Fatality = Fatal | NonFatal
 
--- | Configuration for a worker writing to user-provided handle.
-data HandleWorkerConfig t = HandleWorkerConfig
-  { -- | Conversion function for to 'Text' that we can write out.
-    _handle_worker_serialise :: FinishedSpan -> t
-    -- | Write the serialised trace out.
-  , _handle_worker_writer :: t -> IO ()
-    -- | Should we serialise the value before we send it to the
-    -- worker? This can make a difference if writes to the handle are
-    -- slow but the serialisation itself is cheap: if serialised form
-    -- is cheaper than 'Trace' and quick to compute and writing to the
-    -- handle is taking a while, it's can be more beneficial to keep
-    -- the serialised form in memory rather than the trace itself.
-  , _handle_worker_serialise_before_send :: !Bool
-    -- | What should we do on exception to the handle worker? See
-    -- '_worker_exception'. As usual, the worker finalisation does not
-    -- close the handle, it is up to the user to do so in their
-    -- program or inside this handler.
-    --
-    -- An action which stops the worker threads is provided should you
-    -- wish to use it for teardown.
-  , _handle_worker_on_exception :: Catch.SomeException -> IO () -> IO Fatality
-  }
-
--- | User-provided trace handler. Close over any state you need to
--- track.
-data UserWorkerConfig = UserWorkerConfig
+-- | Worker configuration.
+data WorkerConfig = WorkerConfig
   { -- | A blocking action that sets up the user worker.
-    _user_setup :: IO ()
+    _wc_setup :: IO ()
     -- | Action processing a span.
-  , _user_run :: FinishedSpan -> IO ()
+  , _wc_run :: FinishedSpan -> IO ()
     -- | A blocking action that tears down the worker.
-  , _user_die :: IO ()
-    -- | See '_worker_exception'. '_user_die' or any other teardown
+  , _wc_die :: IO ()
+    -- | See '_worker_exception'. '_wc_die' or any other teardown
     -- will not be called for you, it is up to the user to decide
     -- whether the exception is fatal and how to clean up.
-  , _user_exception :: Catch.SomeException -> IO Fatality
+  , _wc_exception :: Catch.SomeException -> IO Fatality
   }
-
--- | Workers process traces and decide what to do with them.
-data WorkerConfig where
-  HandleWorker :: forall t. HandleWorkerConfig t -> WorkerConfig
-  UserWorker :: UserWorkerConfig -> WorkerConfig
 
 -- | The implementation of the "thing" actually processing the traces:
 -- writing to file, sending elsewhere, discarding...

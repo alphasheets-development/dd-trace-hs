@@ -29,11 +29,34 @@ import           Text.Printf (printf)
 -- | Commands our handle worker can process.
 data Cmd t =
   -- | Command to write out the given 'Trace'.
-  CmdSpan FinishedSpan
+  CmdSpan !FinishedSpan
   -- | Command to write out an already-serialised trace.
-  | CmdSerialisedSpan t
+  | CmdSerialisedSpan !t
   -- | Command the worker to terminate.
   | CmdDie
+
+-- | Configuration for a worker writing to user-provided handle.
+data HandleWorkerConfig t = HandleWorkerConfig
+  { -- | Conversion function for to 'Text' that we can write out.
+    _handle_worker_serialise :: FinishedSpan -> t
+    -- | Write the serialised trace out.
+  , _handle_worker_writer :: t -> IO ()
+    -- | Should we serialise the value before we send it to the
+    -- worker? This can make a difference if writes to the handle are
+    -- slow but the serialisation itself is cheap: if serialised form
+    -- is cheaper than 'Trace' and quick to compute and writing to the
+    -- handle is taking a while, it's can be more beneficial to keep
+    -- the serialised form in memory rather than the trace itself.
+  , _handle_worker_serialise_before_send :: !Bool
+    -- | What should we do on exception to the handle worker? See
+    -- '_worker_exception'. As usual, the worker finalisation does not
+    -- close the handle, it is up to the user to do so in their
+    -- program or inside this handler.
+    --
+    -- An action which stops the worker threads is provided should you
+    -- wish to use it for teardown.
+  , _handle_worker_on_exception :: Catch.SomeException -> IO () -> IO Fatality
+  }
 
 -- | Default config that writes the traces in JSON format, one trace
 -- per line. It is up to the user to make sure the handle is open and
@@ -68,7 +91,7 @@ instance Catch.Exception HandleWorkerDeadException where
 --
 -- Does not open nor close the given handle. Does not set buffering
 -- mode on the handle.
-mkHandleWorker :: forall t. HandleWorkerConfig t -> IO Worker
+mkHandleWorker :: forall t. HandleWorkerConfig t -> IO WorkerConfig
 mkHandleWorker cfg = do
   (inCh, outCh) <- U.newChan 4096
   isDead <- STM.newTVarIO False
@@ -76,21 +99,19 @@ mkHandleWorker cfg = do
         U.writeChan inCh CmdDie
         STM.atomically $ STM.readTVar isDead >>= STM.check . (== True)
 
-  _ <- Async.async $ writeLoop outCh `Catch.catch` \e -> do
-    STM.atomically $ STM.writeTVar isDead True
-    void $ _handle_worker_on_exception cfg e workerDie
-
   let sendWrite = void . U.tryWriteChan inCh
       sendWrite' = if _handle_worker_serialise_before_send cfg
                    then sendWrite . CmdSpan
                    else sendWrite . CmdSerialisedSpan . _handle_worker_serialise cfg
-  return $! Worker
-    { _worker_run = \t -> STM.atomically (STM.readTVar isDead) >>= \case
+  return $! WorkerConfig
+    { _wc_setup = void . Async.async $ writeLoop outCh `Catch.catch` \e -> do
+        STM.atomically $ STM.writeTVar isDead True
+        void $ _handle_worker_on_exception cfg e workerDie
+    , _wc_run = \t -> STM.atomically (STM.readTVar isDead) >>= \case
         False -> sendWrite' t
         True -> Catch.throwM HandleWorkerDeadException
-    , _worker_die = workerDie
-    , _worker_exception = \e -> _handle_worker_on_exception cfg e workerDie
-    , _worker_in_flight = Just 0
+    , _wc_die = workerDie
+    , _wc_exception = \e -> _handle_worker_on_exception cfg e workerDie
     }
   where
     writeLoop :: U.OutChan (Cmd t) -> IO ()
