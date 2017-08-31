@@ -1,1 +1,1 @@
-# dd-trace-hs
+# trace-hs

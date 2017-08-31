@@ -10,15 +10,15 @@ import qualified Control.Monad.Base as Base
 import qualified Control.Monad.Catch as Catch
 import           Control.Monad.IO.Class (MonadIO(..))
 import qualified Control.Monad.Trans.State.Strict as T
+import qualified Control.Trace as Trace
+import qualified Control.Trace.Workers.Datadog as Trace
 import           Data.Monoid ((<>))
-import qualified Network.Datadog.Trace as Trace
-import qualified Network.HTTP.Conduit as HTTP
+import qualified Network.HTTP.Simple as HTTP
 import qualified Network.HTTP.Types as HTTP
-import qualified Test.Tasty as Tasty
-import qualified Test.Tasty.HUnit as HUnit
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
-import           Text.Printf (printf)
+import qualified Test.Tasty as Tasty
+import qualified Test.Tasty.HUnit as HUnit
 
 newtype Tracer a = Tracer { _unTrace :: T.StateT Trace.TraceState IO a }
   deriving ( Applicative
@@ -37,33 +37,28 @@ instance Trace.MonadTrace Tracer where
   askTraceState = Tracer T.get
   modifyTraceState = Tracer . T.modify'
 
-runTracerM :: (Catch.MonadMask m, MonadIO m)
-           => Int -- ^ Port to listen on
+runTracerM :: Int -- ^ Port to listen on
            -> Int -- ^ Number of workers
            -> STM.TVar Int
            -> STM.TVar (Maybe String)
-           -> Tracer a -> m a
+           -> Tracer a -> IO a
 runTracerM port workerCount tCounter diedVar (Tracer act) = do
-  req <- liftIO $ do
-    req <- HTTP.parseRequest (printf "http://localhost:%d/v0.3/traces" port)
-    return $! req { HTTP.method = HTTP.methodPut }
-
-  config <- liftIO Trace.defaultDatadogWorkerConfig >>= \config ->
-    return . Trace.Datadog $! config
-      { Trace._datadog_request = req
-      , Trace._datadog_post_send = \_ -> do
-          STM.atomically $ STM.modifyTVar' tCounter succ
-      , Trace._datadog_debug = False
-      , Trace._datadog_on_exception = \e killWorkers -> do
-          STM.atomically . STM.writeTVar diedVar . Just $
-            "Tracer exception: " <> show e
-          killWorkers
-          return Trace.Fatal
-      }
-
-  -- Run datadog tracer twice to test multiple workers actually work.
-  let workers = Prelude.replicate workerCount config
-  Trace.withTracing workers $ liftIO . T.evalStateT act
+  let configs = Prelude.replicate workerCount $ Trace.defaultDatadogWorkerConfig
+        { Trace._datadog_request =
+              HTTP.setRequestPort port
+            $ Trace._datadog_request Trace.defaultDatadogWorkerConfig
+        , Trace._datadog_post_send = \_ -> do
+            STM.atomically $ STM.modifyTVar' tCounter succ
+        , Trace._datadog_debug = False
+        , Trace._datadog_on_exception = \e killWorkers -> do
+            STM.atomically . STM.writeTVar diedVar . Just $
+              "Tracer exception: " <> show e
+            killWorkers
+            return Trace.Fatal
+        }
+      -- Run datadog tracer twice to test multiple workers actually work.
+  workers <- mapM (fmap Trace.UserWorker . Trace.mkDatadogWorker) configs
+  Trace.withTracing workers $ T.evalStateT act
 
 mkOK :: Wai.Application
 mkOK _req respond = respond $ Wai.responseLBS HTTP.status200 [] "OK"

@@ -1,14 +1,14 @@
 -- |
--- Module   : Network.Datadog.Trace.Workers.Null
+-- Module   : Control.Trace.Workers.Null
 -- Copyright: 2017 Alphasheets
 -- License  : All Rights Reserved
 --
 -- A "worker" that does nothing at all.
-module Network.Datadog.Trace.Workers.Null
+module Control.Trace.Workers.Null
   ( nullWorkerConfig
   ) where
 
-import Network.Datadog.Trace.Types
+import Control.Trace.Types
 
 -- | Performs no actions
 nullWorkerConfig :: WorkerConfig

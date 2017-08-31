@@ -1,12 +1,12 @@
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- |
--- Module   : Network.Datadog.Trace.Workers.Handle
+-- Module   : Control.Trace.Workers.Handle
 -- Copyright: 2017 Alphasheets
 -- License  : All Rights Reserved
 --
 -- Default implementation of a worker writing to an open 'Handle'.
-module Network.Datadog.Trace.Workers.Handle
+module Control.Trace.Workers.Handle
   ( defaultHandleWorkerConfig
   , mkHandleWorker
   , HandleWorkerConfig(..)
@@ -18,11 +18,11 @@ import qualified Control.Concurrent.Chan.Unagi.Bounded as U
 import qualified Control.Concurrent.STM as STM
 import           Control.Monad (void)
 import qualified Control.Monad.Catch as Catch
+import           Control.Trace.Types
 import qualified Data.Aeson.Text as Aeson
 import qualified Data.Text.Lazy as TextLazy
 import qualified Data.Text.Lazy.IO as TextLazy
 import           Data.Typeable (Typeable)
-import           Network.Datadog.Trace.Types
 import           System.IO
 import           Text.Printf (printf)
 

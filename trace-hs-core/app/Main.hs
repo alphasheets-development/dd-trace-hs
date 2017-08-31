@@ -1,7 +1,9 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings          #-}
--- | Make some trace calls to confirm API actually works and reaches
--- datadog. This is a trivial "example" binary.
+-- | Make some trace calls to confirm API actually works and we can
+-- gather traces. This is a trivial "example" binary: real workers
+-- would likely do something more useful with the data than collect it
+-- in memory.
 module Main where
 
 import           Control.Concurrent (threadDelay)
@@ -9,10 +11,10 @@ import qualified Control.Monad.Base as Base
 import qualified Control.Monad.Catch as Catch
 import           Control.Monad.IO.Class (MonadIO(..))
 import qualified Control.Monad.Trans.State.Strict as T
+import qualified Control.Trace as Trace
+import qualified Control.Trace.Types as Trace
 import qualified Data.IORef as IORef
 import           Data.Monoid ((<>))
-import qualified Network.Datadog.Trace as Trace
-import qualified Network.Datadog.Trace.Types as Trace
 
 newtype Tracer a = Tracer { _unTrace :: T.StateT Trace.TraceState IO a }
   deriving ( Applicative

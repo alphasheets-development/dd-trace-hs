@@ -4,13 +4,13 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes                 #-}
 -- |
--- Module   : Network.Datadog.Trace.Types
+-- Module   : Control.Trace.Types
 -- Copyright: 2017 Alphasheets
 -- License  : All Rights Reserved
 --
--- Types used throughout dd-trace-hs. Most useful things are
--- re-exported in @Network.Datadog.Trace@.
-module Network.Datadog.Trace.Types
+-- Types used throughout @trace-hs-core@. Most useful things are
+-- re-exported in @Control.Trace@.
+module Control.Trace.Types
   ( Fatality(..)
   , FinishedSpan
   , HandleWorkerConfig(..)

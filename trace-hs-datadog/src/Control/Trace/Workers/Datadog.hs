@@ -2,12 +2,12 @@
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- |
--- Module   : Network.Datadog.Trace.Workers.Datadog
+-- Module   : Control.Trace.Workers.Datadog
 -- Copyright: 2017 Alphasheets
 -- License  : All Rights Reserved
 --
 -- Default implementation of a worker writing to a datadog agent.
-module Network.Datadog.Trace.Workers.Datadog
+module Control.Trace.Workers.Datadog
   ( defaultDatadogWorkerConfig
   , mkDatadogWorker
   , DatadogWorkerConfig(..)
@@ -21,13 +21,13 @@ import           Control.Monad (replicateM_, unless, void, when)
 import qualified Control.Monad.Catch as Catch
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Trans.Resource (runResourceT)
+import           Control.Trace.Types
 import           Data.Monoid ((<>))
 import           Data.String (fromString)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import           Data.Typeable (Typeable)
 import           GHC.Word (Word64)
-import           Network.Datadog.Trace.Types
 import qualified Network.HTTP.Conduit as HTTP
 import qualified Network.HTTP.Simple as HTTP
 import qualified Network.HTTP.Types as HTTP

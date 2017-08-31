@@ -1,7 +1,7 @@
-name:                trace-hs-datadog
+name:                trace-hs-core
 version:             0.1.0.0
-synopsis:            Datadog tracing backend for trace-hs.
-description:         Datadog tracing backend for trace-hs
+synopsis:            Haskell function tracing API
+description:         Haskell function tracing API
 homepage:            https://github.com/alphasheets-development/trace-hs#readme
 license:             AllRightsReserved
 author:              Mateusz Kowalczyk
@@ -14,39 +14,34 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Control.Trace.Workers.Datadog
+  exposed-modules:     Control.Trace
+                       Control.Trace.Types
+                       Control.Trace.Workers.Handle
+                       Control.Trace.Workers.Null
   build-depends:       base >= 4.7 && < 5
+                     , aeson
                      , async
+                     , clock
+                     , containers
                      , exceptions
-                     , http-conduit
-                     , http-types
-                     , resourcet
+                     , random
                      , stm
                      , text
-                     , trace-hs-core
                      , transformers
                      , unagi-chan
+                     , vector
   default-language:    Haskell2010
   ghc-options:         -Wall -Werror -O2
 
-test-suite trace-hs-datadog-test
-  type:                exitcode-stdio-1.0
-  hs-source-dirs:      test
-  main-is:             Spec.hs
+executable trace-hs-core-trivial
+  hs-source-dirs:      app
+  main-is:             Main.hs
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:       base
                      , trace-hs-core
-                     , trace-hs-datadog
                      , exceptions
-                     , http-conduit
-                     , http-types
-                     , stm
-                     , tasty
-                     , tasty-hunit
                      , transformers
                      , transformers-base
-                     , wai
-                     , warp
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall -Werror
   default-language:    Haskell2010
 
 source-repository head

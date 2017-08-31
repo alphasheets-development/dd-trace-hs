@@ -1,30 +1,32 @@
 {-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE ViewPatterns        #-}
 -- |
--- Module   : Network.Datadog.Trace
+-- Module   : Control.Trace
 -- Copyright: 2017 Alphasheets
 -- License  : All Rights Reserved
 --
--- Tracing library with datadog support.
-module Network.Datadog.Trace
-  ( Network.Datadog.Trace.Types.Fatality(..)
-  , Network.Datadog.Trace.Types.HandleWorkerConfig(..)
-  , Network.Datadog.Trace.Types.MonadTrace(..)
-  , Network.Datadog.Trace.Types.SpanInfo(..)
-  , Network.Datadog.Trace.Types.TraceState(..)
-  , Network.Datadog.Trace.Types.UserWorkerConfig(..)
-  , Network.Datadog.Trace.Types.WorkerConfig(..)
-  , Network.Datadog.Trace.Workers.Handle.defaultHandleWorkerConfig
-  , Network.Datadog.Trace.Workers.Null.nullWorkerConfig
-  , Network.Datadog.Trace.defaultAskTraceState
-  , Network.Datadog.Trace.defaultModifyTraceState
-  , Network.Datadog.Trace.modifySpanMeta
-  , Network.Datadog.Trace.modifySpanMetrics
-  , Network.Datadog.Trace.signalSpanError
-  , Network.Datadog.Trace.span
-  , Network.Datadog.Trace.withTracing
+-- Tracing API. To use it, you implement workers that consume
+-- 'FinishedSpan's. Spans are modelled after the format that @datadog@
+-- monitoring service supports but can be modified by each worker into
+-- required format before being processed further.
+module Control.Trace
+  ( Control.Trace.Types.Fatality(..)
+  , Control.Trace.Types.HandleWorkerConfig(..)
+  , Control.Trace.Types.MonadTrace(..)
+  , Control.Trace.Types.SpanInfo(..)
+  , Control.Trace.Types.TraceState(..)
+  , Control.Trace.Types.UserWorkerConfig(..)
+  , Control.Trace.Types.WorkerConfig(..)
+  , Control.Trace.Workers.Handle.defaultHandleWorkerConfig
+  , Control.Trace.Workers.Null.nullWorkerConfig
+  , Control.Trace.defaultAskTraceState
+  , Control.Trace.defaultModifyTraceState
+  , Control.Trace.modifySpanMeta
+  , Control.Trace.modifySpanMetrics
+  , Control.Trace.signalSpanError
+  , Control.Trace.span
+  , Control.Trace.withTracing
   ) where
 
 import qualified Control.Concurrent.Async as Async
@@ -33,6 +35,9 @@ import           Control.Monad (void)
 import qualified Control.Monad.Catch as Catch
 import           Control.Monad.IO.Class (liftIO, MonadIO(..))
 import qualified Control.Monad.Trans.Class as T
+import           Control.Trace.Types
+import qualified Control.Trace.Workers.Handle
+import qualified Control.Trace.Workers.Null
 import           Data.Foldable (for_, Foldable(toList))
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -41,9 +46,6 @@ import           Data.Monoid (mempty)
 import           Data.Text (Text)
 import           Data.Traversable (Traversable)
 import qualified Data.Vector as V
-import           Network.Datadog.Trace.Types
-import qualified Network.Datadog.Trace.Workers.Handle
-import qualified Network.Datadog.Trace.Workers.Null
 import           Prelude hiding (span)
 import qualified System.Clock as Clock
 import qualified System.Random as Random
@@ -153,7 +155,7 @@ startTracing = liftIO . Async.mapConcurrently mkWorker
   where
     mkWorker config = do
       !w <- case config of
-        HandleWorker hCfg -> Network.Datadog.Trace.Workers.Handle.mkHandleWorker hCfg
+        HandleWorker hCfg -> Control.Trace.Workers.Handle.mkHandleWorker hCfg
         UserWorker uCfg -> do
           _user_setup uCfg
           return $! Worker { _worker_run = _user_run uCfg
