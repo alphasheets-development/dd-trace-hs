@@ -1,0 +1,34 @@
+name:                trace-hs-datadog
+version:             0.1.0.0
+synopsis:            Datadog tracing API
+description:         Datadog tracing API
+homepage:            https://github.com/alphasheets-development/dd-trace-hs#readme
+license:             AllRightsReserved
+author:              Mateusz Kowalczyk
+maintainer:          fuuzetsu@fuuzetsu.com
+copyright:           2017 Alphasheets
+category:            Web
+build-type:          Simple
+extra-source-files:  README.md
+cabal-version:       >=1.10
+
+library
+  hs-source-dirs:      src
+  exposed-modules:     Network.Datadog.Trace.Workers.Datadog
+  build-depends:       base >= 4.7 && < 5
+                     , async
+                     , dd-trace-hs
+                     , exceptions
+                     , http-conduit
+                     , http-types
+                     , resourcet
+                     , stm
+                     , text
+                     , transformers
+                     , unagi-chan
+  default-language:    Haskell2010
+  ghc-options:         -Wall -Werror -O2
+
+source-repository head
+  type:     git
+  location: https://github.com/alphasheets-development/dd-trace-hs

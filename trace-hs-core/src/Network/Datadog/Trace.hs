@@ -9,15 +9,13 @@
 --
 -- Tracing library with datadog support.
 module Network.Datadog.Trace
-  ( Network.Datadog.Trace.Types.DatadogWorkerConfig(..)
-  , Network.Datadog.Trace.Types.Fatality(..)
+  ( Network.Datadog.Trace.Types.Fatality(..)
   , Network.Datadog.Trace.Types.HandleWorkerConfig(..)
   , Network.Datadog.Trace.Types.MonadTrace(..)
   , Network.Datadog.Trace.Types.SpanInfo(..)
   , Network.Datadog.Trace.Types.TraceState(..)
   , Network.Datadog.Trace.Types.UserWorkerConfig(..)
   , Network.Datadog.Trace.Types.WorkerConfig(..)
-  , Network.Datadog.Trace.Workers.Datadog.defaultDatadogWorkerConfig
   , Network.Datadog.Trace.Workers.Handle.defaultHandleWorkerConfig
   , Network.Datadog.Trace.Workers.Null.nullWorkerConfig
   , Network.Datadog.Trace.defaultAskTraceState
@@ -44,7 +42,6 @@ import           Data.Text (Text)
 import           Data.Traversable (Traversable)
 import qualified Data.Vector as V
 import           Network.Datadog.Trace.Types
-import qualified Network.Datadog.Trace.Workers.Datadog
 import qualified Network.Datadog.Trace.Workers.Handle
 import qualified Network.Datadog.Trace.Workers.Null
 import           Prelude hiding (span)
@@ -103,7 +100,7 @@ whenDisabled onDisabled onEnabled = _trace_workers <$> askTraceState >>= \v ->
       Just{} -> True
 
 -- | Tag the given action with a trace. Once the action exits, the
--- trace ends and is queued for sending to datadog.
+-- trace ends and is queued for sending.
 --
 -- Subject to '_trace_enabled'.
 span :: (Catch.MonadMask m, MonadTrace m, MonadIO m) => SpanInfo -> m a -> m a
@@ -133,9 +130,7 @@ modifySpan f = whenDisabled (return ()) $ modifyTraceState $ \state ->
             Just s -> Just $! f s
         }
 
--- | Signal that something went on during this trace. This is
--- convenient to signal abnormal behaviour later visible in datadog
--- dashboard.
+-- | Signal that something went wrong during this trace.
 signalSpanError :: (MonadIO m, MonadTrace m) => m ()
 signalSpanError = modifySpan $ \s -> s { _span_error = Just 1 }
 
@@ -158,7 +153,6 @@ startTracing = liftIO . Async.mapConcurrently mkWorker
   where
     mkWorker config = do
       !w <- case config of
-        Datadog ddCfg -> Network.Datadog.Trace.Workers.Datadog.mkDatadogWorker ddCfg
         HandleWorker hCfg -> Network.Datadog.Trace.Workers.Handle.mkHandleWorker hCfg
         UserWorker uCfg -> do
           _user_setup uCfg

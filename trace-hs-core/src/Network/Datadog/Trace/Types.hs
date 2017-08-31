@@ -12,7 +12,6 @@
 -- re-exported in @Network.Datadog.Trace@.
 module Network.Datadog.Trace.Types
   ( Fatality(..)
-  , DatadogWorkerConfig(..)
   , FinishedSpan
   , HandleWorkerConfig(..)
   , Id
@@ -40,7 +39,6 @@ import           Data.Text (Text)
 import           Data.Vector (Vector)
 import           Data.Word (Word8, Word64)
 import           GHC.Generics (Generic)
-import qualified Network.HTTP.Simple as HTTP
 
 -- | A single trace (such as "user makes a request for a file") is
 -- split into many 'Span's ("find file on disk", "read file", "send
@@ -96,8 +94,8 @@ instance Aeson.ToJSON a => Aeson.ToJSON (Span a) where
   toJSON = Aeson.genericToJSON spanOptions
   toEncoding = Aeson.genericToEncoding spanOptions
 
--- | Information to tag the span with used for categorisation of spans
--- on datadog.
+-- | Information to tag the span with used for categorisation of
+-- spans.
 data SpanInfo = SpanInfo
   { -- | '_span_name'.
     _span_info_name :: !Text
@@ -113,53 +111,6 @@ data SpanInfo = SpanInfo
 -- or not. If it was fatal, the worker should be synchronously cleaned
 -- up and 'Fatal' returned.
 data Fatality = Fatal | NonFatal
-
--- | Worker sending data to a datadog trace agent.
-data DatadogWorkerConfig = DatadogWorkerConfig
-  { -- | Request to perform when sending traces. For example
-    --
-    -- @
-    -- initReq <- 'HTTP.parseRequest' "http://localhost:8126/v0.3/traces"
-    -- return $! 'TraceConfig' { '_trace_request' = initReq { 'HTTP.method' = fromString "PUT" } }
-    -- @
-    _datadog_request :: !HTTP.Request
-    -- | How many green threads to use to consume incoming traces. The
-    -- trade-off is between blocking on slow sends to local trace
-    -- daemon and filling up the queue and between having many idle
-    -- workers.
-  , _datadog_number_of_workers :: !Int
-    -- | Whether to block span writes into '_datadog_chan' when the
-    -- channel is full. This shouldn't affect the user action speed
-    -- but if your channel fills up, it means potential long waits
-    -- between actions.
-  , _datadog_blocking :: !Bool
-    -- | '_datadog_chan' bound.
-  , _datadog_chan_bound :: !Int
-    -- | Action to perform when '_datadog_blocking' is 'False' and the
-    -- channel is full: we're dropping the span and might want to at
-    -- least log that. Ideally you should set the other parameters in
-    -- such a way that this never fires.
-  , _datadog_on_blocked :: FinishedSpan -> IO ()
-    -- | Sometimes we may want to leave tracing on to get a feel for
-    -- how the system will perform with it but not actually send the
-    -- traces anywhere.
-  , _datadog_do_writes :: !Bool
-    -- | Custom trace debug callback
-  , _datadog_debug_callback :: Text -> IO ()
-    -- | Print debug info when sending traces? Uses '_datadog_do_writes'.
-  , _datadog_debug :: !Bool
-    -- | Configurable '_worker_exception'. This is just the logging
-    -- part. Death will be handled by the worker itself. See also
-    -- '_datadog_die_on_exception'.
-    --
-    -- An action that asks the the remaining worker threads to finish
-    -- their work is provided should you wish to use it.
-  , _datadog_on_exception :: Catch.SomeException -> IO () -> IO Fatality
-    -- | Action to run after the span has been sent. Used mostly for
-    -- testing but could be used for logging as well. Blocks the
-    -- thread that performed the send.
-  , _datadog_post_send :: FinishedSpan -> IO ()
-  }
 
 -- | Configuration for a worker writing to user-provided handle.
 data HandleWorkerConfig t = HandleWorkerConfig
@@ -201,7 +152,6 @@ data UserWorkerConfig = UserWorkerConfig
 
 -- | Workers process traces and decide what to do with them.
 data WorkerConfig where
-  Datadog :: DatadogWorkerConfig -> WorkerConfig
   HandleWorker :: forall t. HandleWorkerConfig t -> WorkerConfig
   UserWorker :: UserWorkerConfig -> WorkerConfig
 
