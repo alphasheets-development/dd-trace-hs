@@ -1,7 +1,7 @@
 name:                trace-hs-datadog
 version:             0.1.0.0
 synopsis:            Datadog tracing backend for trace-hs.
-description:         Datadog tracing backend for trace-hs
+description:         Datadog tracing backend for trace-hs.
 homepage:            https://github.com/alphasheets-development/trace-hs#readme
 license:             AllRightsReserved
 author:              Mateusz Kowalczyk

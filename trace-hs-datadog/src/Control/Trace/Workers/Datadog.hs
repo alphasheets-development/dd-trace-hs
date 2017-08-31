@@ -23,7 +23,6 @@ import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Trans.Resource (runResourceT)
 import           Control.Trace.Types
 import           Data.Monoid ((<>))
-import           Data.String (fromString)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import           Data.Typeable (Typeable)
@@ -188,11 +187,11 @@ mkDatadogWorker cfg = do
                     -- fails completely. Investigate if Haskell is failing
                     -- or Go is faling (based on netcat tests, Go) and
                     -- file a bug whereever appropriate.
-                    HTTP.requestHeaders = (HTTP.hContentType, fromString "application/json")
+                    HTTP.requestHeaders = (HTTP.hContentType, "application/json")
                                         : filter (\(h, _) -> h /= HTTP.hContentType)
                                                  (HTTP.requestHeaders req')
                   }
-      debug $ fromString "Sending following span: " <> Text.pack (show s)
+      debug $ "Sending following span: " <> Text.pack (show s)
       -- will throw exception which should bubble up to the catch in
       -- initialisation and modify worker state.
       _ <- HTTP.httpNoBody req''

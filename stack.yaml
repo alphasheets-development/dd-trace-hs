@@ -3,6 +3,7 @@ resolver: lts-9.2
 packages:
   - trace-hs-core
   - trace-hs-datadog
+  - trace-hs-stackdriver
 
 extra-deps:
   - unagi-chan-0.4.0.0

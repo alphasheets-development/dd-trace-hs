@@ -1,7 +1,7 @@
 name:                trace-hs-core
 version:             0.1.0.0
-synopsis:            Haskell function tracing API
-description:         Haskell function tracing API
+synopsis:            Haskell function tracing API.
+description:         Haskell function tracing API.
 homepage:            https://github.com/alphasheets-development/trace-hs#readme
 license:             AllRightsReserved
 author:              Mateusz Kowalczyk
