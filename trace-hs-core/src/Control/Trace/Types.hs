@@ -31,7 +31,6 @@ import qualified Control.Monad.Trans.Reader as Reader
 import qualified Control.Monad.Trans.State.Lazy as StateLazy
 import qualified Control.Monad.Trans.State.Strict as StateStrict
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Types as Aeson
 import           Data.Map.Strict (Map)
 import           Data.Text (Text)
 import           Data.Vector (Vector)
